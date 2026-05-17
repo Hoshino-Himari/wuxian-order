@@ -160,6 +160,10 @@
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日（刪除測試用，勿按）</button>
     </div>
     <div class="admin-row" style="margin-top:8px;">
+      <div style="width:100%;">
+        <label for="lineImportDate" style="margin-bottom:6px;font-size:0.82rem;color:#666;">LINE 只匯入下單日</label>
+        <input type="date" id="lineImportDate" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:0.92rem;font-family:inherit;">
+      </div>
       <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:#6a1b9a;color:white;border-radius:8px;padding:8px 14px;font-size:0.85rem;font-weight:600;cursor:pointer;">
         📱 上傳 LINE 訊息
         <input type="file" id="lineFileInput" accept=".txt" style="display:none" onchange="handleLineFile(event)">
@@ -295,6 +299,11 @@ let adminUnlocked = false;
 // ── 出貨日計算（一三五下單→二四六出貨，出貨日當天追加算同批）────
 function getNextShipDate() {
   const today = new Date();
+  return getShipDateForOrderDate(today);
+}
+
+function getShipDateForOrderDate(orderDate) {
+  const today = new Date(orderDate);
   const dow = today.getDay();
   const orderDays = new Set([1, 3, 5]);
   const shipDays  = new Set([2, 4, 6]);
@@ -340,6 +349,7 @@ window.onload = () => {
 
   const todayStr = fmtDate(new Date());
   const openList = activeStores(todayStr);
+  document.getElementById("lineImportDate").value = todayStr;
 
   const dl = document.getElementById("storeDatalist");
   openList.forEach(s => { const o = document.createElement("option"); o.value = s.n; dl.appendChild(o); });
@@ -532,14 +542,19 @@ let _parsedLineOrders = [];
 function handleLineFile(evt) {
   const file = evt.target.files[0]; evt.target.value = "";
   if (!file) return;
+  const selectedDate = document.getElementById("lineImportDate").value;
+  if (!selectedDate) { toast("請先選擇要匯入的下單日"); return; }
   const reader = new FileReader();
-  reader.onload = e => { _parsedLineOrders = parseLineOrders(e.target.result); showLineModal(); };
+  reader.onload = e => {
+    _parsedLineOrders = parseLineOrders(e.target.result, selectedDate);
+    showLineModal(selectedDate);
+  };
   reader.readAsText(file, "UTF-8");
 }
 
-function parseLineOrders(text) {
+function parseLineOrders(text, selectedOrderDate) {
   const lines = text.split(/\r?\n/);
-  let year = new Date().getFullYear();
+  let activeOrderDate = "";
   let blocks = [], cur = null;
 
   for (const raw of lines) {
@@ -547,10 +562,19 @@ function parseLineOrders(text) {
     if (!line) continue;
 
     const dh = line.match(/^(\d{4})\.(\d{2})\.(\d{2})\s+星期/);
-    if (dh) { year = parseInt(dh[1]); if (cur) blocks.push(cur); cur = null; continue; }
+    if (dh) {
+      if (cur) blocks.push(cur);
+      activeOrderDate = `${dh[1]}-${dh[2]}-${dh[3]}`;
+      cur = null;
+      continue;
+    }
 
     const mh = line.match(/^(\d{2}):(\d{2})\s+([\s\S]*)/);
-    if (mh) { if (cur) blocks.push(cur); cur = { text: mh[3], year }; continue; }
+    if (mh) {
+      if (cur) blocks.push(cur);
+      cur = { text: mh[3], orderDate: activeOrderDate };
+      continue;
+    }
 
     if (cur && !line.startsWith("上傳者：")) cur.text += "\n" + line;
   }
@@ -558,13 +582,10 @@ function parseLineOrders(text) {
 
   const orders = [];
   for (const b of blocks) {
+    if (!b.orderDate || b.orderDate !== selectedOrderDate) continue;
     const t = b.text;
     const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
     if (!qM) continue;
-
-    // 出貨日（到貨日欄位）
-    const dM = t.match(/到貨日[：:]\s*(\d{1,2})\/(\d{1,2})/);
-    if (!dM) continue;
 
     const sM = t.match(/店[\s　]*名[：:]\s*([^\n]*)/);
     let rawStore = sM ? sM[1].trim() : "";
@@ -585,9 +606,9 @@ function parseLineOrders(text) {
     const qty = parseInt(qM[1]);
     if (qty < 1) continue;
 
-    const shipDate = `${b.year}-${dM[1].padStart(2,"0")}-${dM[2].padStart(2,"0")}`;
+    const shipDate = fmtDate(getShipDateForOrderDate(b.orderDate + "T00:00:00"));
     const matchedName = matchStoreName(rawStore);
-    orders.push({ rawStore, matchedName, qty, shipDate });
+    orders.push({ rawStore, matchedName, qty, orderDate: b.orderDate, shipDate });
   }
   return orders;
 }
@@ -601,15 +622,15 @@ function matchStoreName(raw) {
   return found ? found.n : null;
 }
 
-function showLineModal() {
-  if (!_parsedLineOrders.length) { toast("找不到訂單格式，請確認是否為正確的 LINE 匯出檔"); return; }
+function showLineModal(selectedOrderDate) {
+  if (!_parsedLineOrders.length) { toast(`${fmtShort(selectedOrderDate)} 找不到訂單，請確認日期或 LINE 匯出檔`); return; }
 
   const byDate = {};
   _parsedLineOrders.forEach(o => { if (!byDate[o.shipDate]) byDate[o.shipDate]=[]; byDate[o.shipDate].push(o); });
 
   const unmatched = _parsedLineOrders.filter(o => !o.matchedName).length;
   document.getElementById("lineModalSub").textContent =
-    `共解析 ${_parsedLineOrders.length} 筆${unmatched ? `，${unmatched} 筆店名未比對到` : ""}`;
+    `${fmtShort(selectedOrderDate)} 下單，共解析 ${_parsedLineOrders.length} 筆${unmatched ? `，${unmatched} 筆店名未比對到` : ""}`;
 
   let html = "";
   for (const date of Object.keys(byDate).sort()) {
@@ -641,6 +662,7 @@ function closeLineModal() { document.getElementById("lineModal").style.display =
 
 async function confirmLineImport() {
   if (!_parsedLineOrders.length) return;
+  const importCount = _parsedLineOrders.length;
   const byDate = {};
   _parsedLineOrders.forEach(o => {
     const name = o.matchedName || o.rawStore;
@@ -656,7 +678,7 @@ async function confirmLineImport() {
       )
     ));
     closeLineModal();
-    toast(`已匯入 ${_parsedLineOrders.length} 筆訂單`);
+    toast(`已匯入 ${importCount} 筆訂單`);
   } catch(e) {
     toast("匯入失敗：" + e.message);
     btn.disabled = false; btn.textContent = "✓ 確認匯入";
