@@ -576,9 +576,16 @@ function parseLineOrders(text) {
   return orders;
 }
 
+const STORE_ALIASES = {
+  "自強店": "旗艦店",
+  "大里店": "中興店",
+};
+
 function matchStoreName(raw) {
   if (!raw) return null;
+  if (STORE_ALIASES[raw]) return STORE_ALIASES[raw];
   const norm = raw.replace(/^五鮮級[-－\s]?/, "").trim();
+  if (STORE_ALIASES[norm]) return STORE_ALIASES[norm];
   let found = STORES.find(s => s.n === raw || s.n === norm);
   if (found) return found.n;
   found = STORES.find(s => norm.includes(s.n) || s.n.includes(norm));
