@@ -274,6 +274,7 @@ const db = firebase.firestore();
 let shipDate = "";    // 固定出貨日，供表單送出用
 let currentDate = ""; // 目前查看的出貨日，可切換
 let todayOrders = {};
+let noNeedStores = {};  // { storeName: true }
 let unsubscribe = null;
 
 // ── 出貨日計算（一三五下單→二四六出貨，出貨日當天追加算同批）────
@@ -354,7 +355,9 @@ function setViewDate(dateStr) {
   document.getElementById("adminDateSwitch").value = dateStr;
   if (unsubscribe) unsubscribe();
   unsubscribe = db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`).onSnapshot(snap => {
-    todayOrders = snap.exists && snap.data().stores ? snap.data().stores : {};
+    const data = snap.exists ? snap.data() : {};
+    todayOrders  = data.stores  || {};
+    noNeedStores = data.noNeed  || {};
     renderOrderList();
   });
 }
@@ -444,9 +447,12 @@ function renderOrderList() {
 
   if (pending.length) {
     html += `<div class="pending-title">未叫貨（${pending.length} 家）</div>
-    <div class="pending-tags">${pending.map(s =>
-      `<span class="pending-tag">${s.n}${s.dayOff ? `<span style="color:#e65100;margin-left:3px;font-size:0.72rem;">休${s.dayOff}</span>` : ""}</span>`
-    ).join("")}</div>`;
+    <div class="pending-tags">${pending.map(s => {
+      const noNeed = noNeedStores[s.n];
+      return `<span class="pending-tag">${s.n}${
+        noNeed ? `<span style="color:#1565c0;margin-left:3px;font-size:0.72rem;background:#e3f2fd;border-radius:3px;padding:0 3px;">無需</span>` : ""
+      }${s.dayOff ? `<span style="color:#e65100;margin-left:3px;font-size:0.72rem;">休${s.dayOff}</span>` : ""}</span>`;
+    }).join("")}</div>`;
   }
 
   box.innerHTML = html;
@@ -503,14 +509,17 @@ function toast(msg) {
 }
 
 // ── LINE 訂單匯入 ─────────────────────────────────────────
-let _parsedLineOrders = [];   // 所有解析出的訂單
+let _parsedLineOrders = [];
+let _parsedNoNeeds = [];
 
 function handleLineFile(evt) {
   const file = evt.target.files[0]; evt.target.value = "";
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    _parsedLineOrders = parseLineOrders(e.target.result);
+    const result = parseLineOrders(e.target.result);
+    _parsedLineOrders = result.orders;
+    _parsedNoNeeds    = result.noNeeds;
     showLineModal();
   };
   reader.readAsText(file, "UTF-8");
@@ -545,9 +554,22 @@ function parseLineOrders(text) {
   if (cur) blocks.push(cur);
 
   const orders = [];
+  const noNeeds = [];
+
   for (const b of blocks) {
     if (!b.orderDate) continue;
     const t = b.text;
+
+    // 偵測「無須/無需叫貨」訊息
+    if (NO_NEED_RE.test(t)) {
+      const storeName = extractStoreFromText(t);
+      if (storeName) {
+        const shipDate = fmtDate(getShipDateForOrderDate(b.orderDate + "T00:00:00"));
+        noNeeds.push({ storeName, orderDate: b.orderDate, shipDate });
+      }
+      continue;
+    }
+
     const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
     if (!qM) continue;
 
@@ -555,13 +577,11 @@ function parseLineOrders(text) {
     let rawStore = sM ? sM[1].trim() : "";
 
     if (!rawStore) {
-      // 整段訊息都找「五鮮級xxx店」
       const fm = t.match(/五鮮級[\s-]?(\S+店)/);
       if (fm) rawStore = fm[1];
     }
 
     if (!rawStore) {
-      // 最後備援：整段訊息有沒有直接出現已知店名
       const found = STORES.find(s => t.includes(s.n));
       if (found) rawStore = found.n;
     }
@@ -575,15 +595,34 @@ function parseLineOrders(text) {
     const matchedName = matchStoreName(rawStore);
     orders.push({ rawStore, matchedName, qty, orderDate: b.orderDate, shipDate });
   }
-  return orders;
+  return { orders, noNeeds };
+}
+
+function extractStoreFromText(t) {
+  // 1. 五鮮級 前綴
+  const fm = t.match(/五鮮級[\s-]?(\S+店)/);
+  if (fm) { const m = matchStoreName(fm[1]); if (m) return m; }
+  // 2. 別名（含部分比對）
+  for (const [alias, real] of Object.entries(STORE_ALIASES)) {
+    if (t.includes(alias)) return real;
+  }
+  // 3. 已知店名
+  const found = STORES.find(s => t.includes(s.n));
+  return found ? found.n : null;
 }
 
 const STORE_ALIASES = {
-  "自強店": "旗艦店",
-  "大里店": "中興店",
-  "岡山":   "岡山旗艦店",
-  "鼓山店": "新鼓山店",
+  "自強店":   "旗艦店",
+  "大里店":   "中興店",
+  "岡山":     "岡山旗艦店",
+  "鼓山店":   "新鼓山店",
+  "燒甲佳里": "燒甲佳里店",
+  "燒甲陽明": "燒甲陽明店",
+  "燒甲民北": "燒甲嘉義民北店",
+  "民北":     "燒甲嘉義民北店",
 };
+
+const NO_NEED_RE = /無須叫貨|無需叫貨|今日無需|今日無須/;
 
 function matchStoreName(raw) {
   if (!raw) return null;
@@ -597,7 +636,7 @@ function matchStoreName(raw) {
 }
 
 function showLineModal() {
-  if (!_parsedLineOrders.length) { toast("找不到訂單，請確認 LINE 匯出檔格式"); return; }
+  if (!_parsedLineOrders.length && !_parsedNoNeeds.length) { toast("找不到訂單，請確認 LINE 匯出檔格式"); return; }
 
   // 以下單日分組
   const byOrderDate = {};
@@ -605,23 +644,29 @@ function showLineModal() {
     if (!byOrderDate[o.orderDate]) byOrderDate[o.orderDate] = [];
     byOrderDate[o.orderDate].push(o);
   });
+  // 無需叫貨也加入同一日期分組（不重複）
+  _parsedNoNeeds.forEach(o => { if (!byOrderDate[o.orderDate]) byOrderDate[o.orderDate] = []; });
 
   const dates = Object.keys(byOrderDate).sort();
   const unmatched = _parsedLineOrders.filter(o => !o.matchedName).length;
   document.getElementById("lineModalSub").textContent =
-    `共找到 ${dates.length} 個下單日、${_parsedLineOrders.length} 筆訂單${unmatched ? `，${unmatched} 筆店名未比對到` : ""}`;
+    `共找到 ${dates.length} 個下單日、${_parsedLineOrders.length} 筆訂單` +
+    (_parsedNoNeeds.length ? `、${_parsedNoNeeds.length} 筆無需叫貨` : "") +
+    (unmatched ? `，${unmatched} 筆店名未比對到` : "");
 
   let html = "";
   dates.forEach((orderDate, idx) => {
     const rows = byOrderDate[orderDate];
-    const shipDate = rows[0].shipDate;
+    const shipDate = (rows[0] || _parsedNoNeeds.find(n => n.orderDate === orderDate) || {}).shipDate || "";
+    const orderCount = rows.length;
+    const noNeedThisDate = _parsedNoNeeds.filter(n => n.orderDate === orderDate);
     const checked = dates.length === 1 ? "checked" : "";
     const groupId = `line-group-${idx}`;
     html += `<div style="margin-bottom:12px;border:1.5px solid #e0e0e0;border-radius:10px;overflow:hidden;">
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f5f5f5;">
         <input type="checkbox" class="date-check" data-order-date="${orderDate}" ${checked}
                style="width:18px;height:18px;accent-color:#2e7d32;cursor:pointer;flex-shrink:0;">
-        <span style="flex:1;font-weight:600;font-size:0.9rem;">下單日 ${fmtShort(orderDate)} → 出貨日 ${fmtShort(shipDate)}（${rows.length} 筆）</span>
+        <span style="flex:1;font-weight:600;font-size:0.9rem;">下單日 ${fmtShort(orderDate)} → 出貨日 ${fmtShort(shipDate)}（${orderCount} 筆訂單${noNeedThisDate.length ? `、${noNeedThisDate.length} 筆無需` : ""}）</span>
         <button onclick="toggleLineGroup('${groupId}')" style="border:none;background:none;font-size:1rem;cursor:pointer;padding:0 4px;color:#888;" id="${groupId}-btn">▾</button>
       </div>
       <div id="${groupId}" style="display:none;">
@@ -640,6 +685,13 @@ function showLineModal() {
             : `<span style="color:#c62828;">⚠ 未比對</span>`}</td>
         </tr>`;
     });
+    noNeedThisDate.forEach(o => {
+      html += `<tr style="background:#f0f7ff;">
+          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${escHtml(o.storeName)}</td>
+          <td style="padding:5px 8px;text-align:center;border-bottom:1px solid #f0f0f0;">—</td>
+          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;"><span style="color:#1565c0;">無需叫貨</span></td>
+        </tr>`;
+    });
     html += `</tbody></table></div></div>`;
   });
 
@@ -655,7 +707,7 @@ function toggleLineGroup(id) {
   btn.textContent = open ? "▴" : "▾";
 }
 
-function closeLineModal() { document.getElementById("lineModal").style.display = "none"; _parsedLineOrders = []; }
+function closeLineModal() { document.getElementById("lineModal").style.display = "none"; _parsedLineOrders = []; _parsedNoNeeds = []; }
 
 async function confirmLineImport() {
   if (!_parsedLineOrders.length) return;
@@ -670,21 +722,25 @@ async function confirmLineImport() {
   const byShipDate = {};
   _parsedLineOrders.forEach(o => {
     if (!checkedDates.has(o.orderDate)) return;
-    if (!o.matchedName) return;  // 未比對到的不匯入
-    const name = o.matchedName;
-    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = {};
-    byShipDate[o.shipDate][name] = o.qty;
+    if (!o.matchedName) return;
+    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = { stores: {}, noNeed: {} };
+    byShipDate[o.shipDate].stores[o.matchedName] = o.qty;
+  });
+  _parsedNoNeeds.forEach(o => {
+    if (!checkedDates.has(o.orderDate)) return;
+    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = { stores: {}, noNeed: {} };
+    byShipDate[o.shipDate].noNeed[o.storeName] = true;
   });
 
-  const importCount = Object.values(byShipDate).reduce((s, stores) => s + Object.keys(stores).length, 0);
+  const importCount = Object.values(byShipDate).reduce((s, d) => s + Object.keys(d.stores).length, 0);
   const btn = document.getElementById("lineConfirmBtn");
   btn.disabled = true; btn.textContent = "匯入中…";
   try {
-    await Promise.all(Object.entries(byShipDate).map(([date, stores]) => {
+    await Promise.all(Object.entries(byShipDate).map(([date, data]) => {
       const docRef = db.collection("orders_wuxian").doc(`五鮮級_${date}`);
-      // 用 dot-notation update 逐筆合併，不覆蓋既有資料
       const updates = { date, updatedAt: new Date().toISOString() };
-      Object.entries(stores).forEach(([name, qty]) => { updates[`stores.${name}`] = qty; });
+      Object.entries(data.stores).forEach(([name, qty]) => { updates[`stores.${name}`] = qty; });
+      Object.entries(data.noNeed).forEach(([name]) => { updates[`noNeed.${name}`] = true; });
       return docRef.set({ date, updatedAt: updates.updatedAt }, { merge: true })
                    .then(() => docRef.update(updates));
     }));
