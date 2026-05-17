@@ -147,13 +147,28 @@
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
       <div class="section-title" style="margin-bottom:0"><span class="live-dot"></span>訂單紀錄</div>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <input type="date" id="adminDate" style="padding:5px 8px;border:1.5px solid #ddd;border-radius:8px;font-size:0.85rem;font-family:inherit;">
-        <button class="btn-sm btn-gray" style="padding:6px 10px;font-size:0.82rem;" onclick="changeDate()">切換</button>
-      </div>
+      <button id="datePickerBtn" onclick="openDatePicker()"
+              style="padding:5px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:0.85rem;font-family:inherit;background:#fafafa;cursor:pointer;color:#222;"></button>
     </div>
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
+    </div>
+  </div>
+
+  <!-- 自製日曆 -->
+  <div id="calOverlay" onclick="if(event.target===this)closeDatePicker()"
+       style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:400;align-items:center;justify-content:center;">
+    <div style="background:white;border-radius:16px;padding:20px;width:310px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <button onclick="calMove(-1)" style="border:none;background:none;font-size:1.3rem;cursor:pointer;color:#444;">‹</button>
+        <span id="calTitle" style="font-weight:700;font-size:1rem;"></span>
+        <button onclick="calMove(1)"  style="border:none;background:none;font-size:1.3rem;cursor:pointer;color:#444;">›</button>
+      </div>
+      <div id="calGrid"></div>
+      <div style="margin-top:12px;font-size:0.75rem;color:#888;display:flex;gap:12px;align-items:center;">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1e6b3e;margin-right:4px;"></span>出貨日（二四六）</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565c0;margin-right:4px;"></span>今天</span>
+      </div>
     </div>
   </div>
 
@@ -353,7 +368,7 @@ window.onload = () => {
 
 function setViewDate(dateStr) {
   currentDate = dateStr;
-  document.getElementById("adminDate").value = dateStr;
+  document.getElementById("datePickerBtn").textContent = fmtShort(dateStr);
   if (unsubscribe) unsubscribe();
   unsubscribe = db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`).onSnapshot(snap => {
     const data = snap.exists ? snap.data() : {};
@@ -364,8 +379,72 @@ function setViewDate(dateStr) {
 }
 
 function changeDate() {
-  const d = document.getElementById("adminDate").value;
-  if (d) { setViewDate(d); toast(`切換到 ${fmtShort(d)}`); }
+  // kept for compatibility (called nowhere now but safe to leave)
+}
+
+// ── 自製日曆 ──────────────────────────────────────────────
+let _calYear, _calMonth;
+
+function openDatePicker() {
+  const d = new Date(currentDate + "T00:00:00");
+  _calYear  = d.getFullYear();
+  _calMonth = d.getMonth();
+  renderCal();
+  const ov = document.getElementById("calOverlay");
+  ov.style.display = "flex";
+}
+function closeDatePicker() {
+  document.getElementById("calOverlay").style.display = "none";
+}
+function calMove(delta) {
+  _calMonth += delta;
+  if (_calMonth < 0)  { _calMonth = 11; _calYear--; }
+  if (_calMonth > 11) { _calMonth = 0;  _calYear++; }
+  renderCal();
+}
+function renderCal() {
+  const DAYS = ["一","二","三","四","五","六","日"];
+  // 出貨日：二四六 → dayOfWeek 2,4,6
+  const SHIP_DAYS = new Set([2, 4, 6]);
+  const today = fmtDate(new Date());
+  document.getElementById("calTitle").textContent =
+    `${_calYear} 年 ${_calMonth + 1} 月`;
+
+  const firstDow = new Date(_calYear, _calMonth, 1).getDay(); // 0=Sun
+  // Convert to Mon-based index (0=Mon … 6=Sun)
+  const startOffset = (firstDow === 0 ? 6 : firstDow - 1);
+  const daysInMonth = new Date(_calYear, _calMonth + 1, 0).getDate();
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;">`;
+  // Headers
+  DAYS.forEach((d, i) => {
+    const isShip = [1,3,5].includes(i); // 二四六 columns (0-based Mon)
+    html += `<div style="font-size:0.75rem;font-weight:700;padding:4px 0;color:${isShip ? "#1e6b3e" : "#888"};">${d}</div>`;
+  });
+  // Empty cells before 1st
+  for (let i = 0; i < startOffset; i++) html += `<div></div>`;
+  // Day cells
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${_calYear}-${String(_calMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    const dow = new Date(dateStr + "T00:00:00").getDay(); // 0=Sun
+    const isShip    = SHIP_DAYS.has(dow);
+    const isToday   = dateStr === today;
+    const isSelected = dateStr === currentDate;
+    let bg = "transparent", color = "#222", fw = "400";
+    if (isSelected) { bg = "#1e6b3e"; color = "white"; fw = "700"; }
+    else if (isToday) { bg = "#e3f2fd"; color = "#1565c0"; fw = "700"; }
+    else if (isShip)  { color = "#1e6b3e"; fw = "600"; }
+    html += `<div onclick="pickDate('${dateStr}')"
+      style="border-radius:50%;padding:6px 2px;cursor:pointer;background:${bg};color:${color};font-weight:${fw};font-size:0.9rem;"
+      onmouseover="this.style.opacity='.7'" onmouseout="this.style.opacity='1'">${day}</div>`;
+  }
+  html += `</div>`;
+  document.getElementById("calGrid").innerHTML = html;
+}
+function pickDate(dateStr) {
+  closeDatePicker();
+  setViewDate(dateStr);
+  toast(`切換到 ${fmtShort(dateStr)}`);
 }
 
 // ── 表單 ─────────────────────────────────────────────────
