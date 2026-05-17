@@ -551,7 +551,7 @@ function parseLineOrders(text) {
     const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
     if (!qM) continue;
 
-    const sM = t.match(/店[\s　]*名[：:]\s*([^\n]+)/);
+    const sM = t.match(/店[\s　]*名[：:][^\S\n]*([^\n]+)/);
     let rawStore = sM ? sM[1].trim() : "";
 
     if (!rawStore) {
