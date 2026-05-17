@@ -64,6 +64,9 @@
     .no-orders { text-align: center; color: #bbb; padding: 20px 0; font-size: 0.92rem; }
     .order-total { display: flex; justify-content: space-between; padding: 10px 0 0;
                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
+    .pending-title { font-size: 0.8rem; color: #bbb; margin: 12px 0 6px; letter-spacing:.04em; }
+    .pending-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .pending-tag { font-size: 0.8rem; background: #f5f5f5; color: #aaa; border-radius: 6px; padding: 3px 8px; }
 
     /* 管理員區塊 */
     .admin-toggle { text-align: center; margin-bottom: 12px; }
@@ -96,7 +99,7 @@
 <body>
 
 <header>
-  <h1>🦪 五鮮級下單</h1>
+  <h1>五鮮級下單</h1>
   <div class="date-badge" id="headerDate">載入中…</div>
 </header>
 
@@ -117,7 +120,7 @@
       <label>下單數量（包）</label>
       <div class="qty-row">
         <button class="qty-btn" onclick="adjustQty(-1)">−</button>
-        <input type="number" id="qtyInput" value="1" min="1" max="99" inputmode="numeric">
+        <input type="number" id="qtyInput" value="2" min="2" max="99" inputmode="numeric">
         <button class="qty-btn" onclick="adjustQty(1)">+</button>
       </div>
     </div>
@@ -132,7 +135,7 @@
     <button class="btn-edit" onclick="resetForm()">修改 / 重新填寫</button>
   </div>
 
-  <!-- 訂單 + 日期切換 -->
+  <!-- 訂單紀錄（所有人可見） -->
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
       <div class="section-title" style="margin-bottom:0"><span class="live-dot"></span>訂單紀錄</div>
@@ -144,7 +147,6 @@
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
     </div>
-    <button class="btn-sm btn-blue" style="margin-top:12px;width:100%;" onclick="exportExcel()">⬇ 下載 Excel</button>
   </div>
 
   <!-- 管理員 -->
@@ -153,11 +155,27 @@
   </div>
   <div class="admin-panel card" id="adminPanel">
     <div class="admin-row">
-      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日所有訂單</button>
+      <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
+      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日（刪除測試用，勿按）</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
   </div>
 
+</div>
+
+<!-- PIN 輸入 overlay -->
+<div id="pinOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:none;align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:14px;padding:28px 24px;width:260px;text-align:center;">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:14px;">管理員 PIN 碼</div>
+    <input id="pinInput" type="password" inputmode="numeric" maxlength="10"
+           style="width:100%;padding:12px;font-size:1.3rem;text-align:center;border:1.5px solid #ddd;border-radius:10px;letter-spacing:.2em;"
+           placeholder="••••">
+    <div id="pinError" style="color:#e53935;font-size:0.82rem;margin-top:6px;min-height:18px;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-sm btn-green" style="flex:1;background:#1e6b3e;color:white;" onclick="confirmPin()">確認</button>
+      <button class="btn-sm btn-gray" style="flex:1;" onclick="closePinOverlay()">取消</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -171,8 +189,7 @@ const STORES = [
   { r:"新竹", n:"環北店" },
   { r:"新竹", n:"旗艦店" },
 
-  { r:"台中", n:"中興店" },
-  { r:"台中", n:"大里中興店", dayOff:"週二、三" },
+  { r:"台中", n:"中興店", dayOff:"週二、三" },
   { r:"台中", n:"豐原店" },
   { r:"台中", n:"霧峰店" },
 
@@ -184,7 +201,7 @@ const STORES = [
   { r:"彰化", n:"北斗店" },
   { r:"彰化", n:"溪湖店" },
   { r:"彰化", n:"和美店" },
-  { r:"彰化", n:"中正店" },
+  { r:"彰化", n:"彰中店" },
   { r:"彰化", n:"鹿港店" },
 
   { r:"雲林", n:"斗六店" },
@@ -212,10 +229,10 @@ const STORES = [
   { r:"台南", n:"佳里店" },
   { r:"台南", n:"麻豆店" },
   { r:"台南", n:"學甲店" },
-  { r:"台南", n:"路竹店" },
 
+  { r:"高雄", n:"路竹店" },
   { r:"高雄", n:"新鼓山店" },
-  { r:"高雄", n:"建工店" },
+  { r:"高雄", n:"建工店", closeDate:"2026-05-24" },
   { r:"高雄", n:"小港店" },
   { r:"高雄", n:"鳳山店" },
   { r:"高雄", n:"七賢店" },
@@ -254,8 +271,9 @@ if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 // ── 狀態 ─────────────────────────────────────────────
-let currentDate = "";       // YYYY-MM-DD，出貨日
-let todayOrders = {};       // { storeName: qty }
+let shipDate = "";          // 本次下單對應的出貨日（固定，供送出下單用）
+let currentDate = "";       // 管理員正在查看的出貨日（可切換）
+let todayOrders = {};
 let unsubscribe = null;
 
 // ── 計算出貨日（一三五下單 → 二四六出貨）─────────────
@@ -282,13 +300,31 @@ function getNextShipDate() {
   const d = new Date(today); d.setDate(d.getDate() + 1); return d;
 }
 
+// ── 判斷門市是否在指定日期仍開業 ──────────────────────
+function isOpen(store, dateStr) {
+  if (!store.closeDate) return true;
+  return dateStr < store.closeDate;   // closeDate 當天已關，之前都算開
+}
+function activeStores(dateStr) {
+  return STORES.filter(s => isOpen(s, dateStr));
+}
+
 // ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
-  setDate(fmtDate(getNextShipDate()));
+  shipDate = fmtDate(getNextShipDate());
+  // Header：固定顯示本週下單日 → 出貨日，不隨管理員切換
+  const orderDateObj = new Date(shipDate + "T00:00:00");
+  orderDateObj.setDate(orderDateObj.getDate() - 1);
+  document.getElementById("headerDate").textContent =
+    `${fmtShort(fmtDate(orderDateObj))} 下單 → ${fmtShort(shipDate)} 出貨`;
+  setViewDate(shipDate);
+
+  const todayStr = fmtDate(new Date());
+  const openList = activeStores(todayStr);
 
   // datalist（文字輸入autocomplete）
   const dl = document.getElementById("storeDatalist");
-  STORES.forEach(s => {
+  openList.forEach(s => {
     const opt = document.createElement("option");
     opt.value = s.n;
     dl.appendChild(opt);
@@ -296,11 +332,11 @@ window.onload = () => {
 
   // 下拉選單（備用）
   const sel = document.getElementById("storeSelect");
-  const regions = [...new Set(STORES.map(s => s.r))];
+  const regions = [...new Set(openList.map(s => s.r))];
   regions.forEach(r => {
     const grp = document.createElement("optgroup");
     grp.label = r;
-    STORES.filter(s => s.r === r).forEach(s => {
+    openList.filter(s => s.r === r).forEach(s => {
       const opt = document.createElement("option");
       opt.value = s.n;
       opt.textContent = s.n + (s.dayOff ? ` (休${s.dayOff})` : "");
@@ -317,16 +353,21 @@ window.onload = () => {
   });
 };
 
-function fmtDate(d) { return d.toISOString().slice(0,10); }
-function fmtDateCN(str) {
+const WEEKDAYS = ["日","一","二","三","四","五","六"];
+function fmtDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+function fmtShort(str) {
   if (!str) return "";
-  const [y,m,d] = str.split("-");
-  return `${y}年${parseInt(m)}月${parseInt(d)}日 出貨`;
+  const d = new Date(str + "T00:00:00");
+  return `${d.getMonth()+1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
 }
 
-function setDate(dateStr) {
+function setViewDate(dateStr) {
   currentDate = dateStr;
-  document.getElementById("headerDate").textContent = fmtDateCN(dateStr);
   document.getElementById("adminDate").value = dateStr;
   listenOrders();
 }
@@ -357,16 +398,16 @@ async function submitOrder() {
              || document.getElementById("storeSelect").value;
   const qty   = parseInt(document.getElementById("qtyInput").value) || 0;
   if (!store) { toast("請輸入門市名稱"); return; }
-  if (qty < 1) { toast("請輸入包數"); return; }
+  if (qty < 2) { toast("最低下單量為 2 包"); return; }
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true;
   btn.textContent = "送出中…";
 
-  const docId = `五鮮級_${currentDate}`;
+  const docId = `五鮮級_${shipDate}`;
   try {
     await db.collection("orders_wuxian").doc(docId).set(
-      { stores: { [store]: qty }, date: currentDate, updatedAt: new Date().toISOString() },
+      { stores: { [store]: qty }, date: shipDate, updatedAt: new Date().toISOString() },
       { merge: true }
     );
     // 顯示成功
@@ -390,7 +431,7 @@ function resetForm() {
   document.getElementById("submitBtn").textContent = "送出下單";
   document.getElementById("storeInput").value = "";
   document.getElementById("storeSelect").value = "";
-  document.getElementById("qtyInput").value = 1;
+  document.getElementById("qtyInput").value = 2;
   document.getElementById("storeInput").focus();
 }
 
@@ -398,7 +439,7 @@ function resetForm() {
 function adjustQty(delta) {
   const el = document.getElementById("qtyInput");
   const v = (parseInt(el.value) || 0) + delta;
-  el.value = Math.max(1, Math.min(99, v));
+  el.value = Math.max(2, Math.min(99, v));
 }
 
 // ── 計算箱型 ─────────────────────────────────────────
@@ -412,42 +453,82 @@ function renderOrderList() {
   const box = document.getElementById("orderList");
   const knownNames = new Set(STORES.map(s => s.n));
 
-  // 照 STORES 順序排，再接不在清單的
-  const entries = STORES
+  const storeList = activeStores(currentDate);
+  const ordered = storeList
     .filter(s => todayOrders[s.n] > 0)
     .map(s => ({ n: s.n, qty: todayOrders[s.n] }));
   Object.keys(todayOrders).forEach(name => {
     if (!knownNames.has(name) && todayOrders[name] > 0)
-      entries.push({ n: name, qty: todayOrders[name] });
+      ordered.push({ n: name, qty: todayOrders[name] });
   });
 
-  if (!entries.length) {
-    box.innerHTML = '<div class="no-orders">尚無訂單</div>';
-    return;
+  const pending = storeList.filter(s => !(todayOrders[s.n] > 0));
+
+  let html = "";
+
+  if (!ordered.length) {
+    html += '<div class="no-orders">尚無訂單</div>';
+  } else {
+    const totalPkg = ordered.reduce((s, e) => s + e.qty, 0);
+    html += ordered.map(e =>
+      `<div class="order-item">
+        <span class="order-name">${e.n}</span>
+        <span class="order-qty">${e.qty} 包</span>
+      </div>`
+    ).join("") + `<div class="order-total">
+      <span>共 ${ordered.length} 家</span>
+      <span>${totalPkg} 包</span>
+    </div>`;
   }
 
-  const totalPkg = entries.reduce((s, e) => s + e.qty, 0);
-  box.innerHTML = entries.map(e =>
-    `<div class="order-item">
-      <span class="order-name">${e.n}</span>
-      <span class="order-qty">${e.qty} 包</span>
-    </div>`
-  ).join("") + `<div class="order-total">
-    <span>共 ${entries.length} 家</span>
-    <span>${totalPkg} 包</span>
-  </div>`;
+  if (pending.length) {
+    html += `<div class="pending-title">未叫貨（${pending.length} 家）</div>
+    <div class="pending-tags">
+      ${pending.map(s => `<span class="pending-tag">${s.n}${s.dayOff ? `<span style="color:#e65100;margin-left:3px;font-size:0.72rem;">休${s.dayOff}</span>` : ""}</span>`).join("")}
+    </div>`;
+  }
+
+  box.innerHTML = html;
 }
 
 // ── 管理員 ────────────────────────────────────────────
+let adminUnlocked = false;
 function toggleAdmin() {
   const panel = document.getElementById("adminPanel");
-  panel.classList.toggle("open");
+  if (panel.classList.contains("open")) {
+    panel.classList.remove("open");
+    return;
+  }
+  if (adminUnlocked) { panel.classList.add("open"); return; }
+  openPinOverlay();
+}
+function openPinOverlay() {
+  const ov = document.getElementById("pinOverlay");
+  ov.style.display = "flex";
+  document.getElementById("pinInput").value = "";
+  document.getElementById("pinError").textContent = "";
+  setTimeout(() => document.getElementById("pinInput").focus(), 50);
+}
+function closePinOverlay() {
+  document.getElementById("pinOverlay").style.display = "none";
+}
+function confirmPin() {
+  const val = document.getElementById("pinInput").value;
+  if (val === "7798") {
+    adminUnlocked = true;
+    closePinOverlay();
+    document.getElementById("adminPanel").classList.add("open");
+  } else {
+    document.getElementById("pinError").textContent = "PIN 碼錯誤，請再試一次";
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinInput").focus();
+  }
 }
 
 function changeDate() {
   const d = document.getElementById("adminDate").value;
   if (!d) return;
-  setDate(d);
+  setViewDate(d);
   toast(`切換到 ${fmtDateCN(d)}`);
 }
 
@@ -463,45 +544,22 @@ function clearDate() {
 function exportExcel() {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1：出貨明細
+  // Sheet 1：全部門市（依帳務順序，0包的也列出）
   const header = ["區域", "門市", "下單量(包)", "總斤數", "箱型", "箱數"];
   const rows = [header];
-  const regions = [...new Set(STORES.map(s => s.r))];
-  let totalPkg = 0;
-  regions.forEach(r => {
-    STORES.filter(s => s.r === r && todayOrders[s.n] > 0).forEach(s => {
-      const qty = todayOrders[s.n];
+  activeStores(currentDate).forEach(s => {
+    const qty = todayOrders[s.n] || 0;
+    if (qty > 0) {
       const b = calcBox(qty);
-      rows.push([r, s.n, qty, qty*5, b.type, b.count]);
-      totalPkg += qty;
-    });
-  });
-  // 不在 STORES 的
-  const knownNames = new Set(STORES.map(s => s.n));
-  Object.keys(todayOrders).forEach(name => {
-    if (!knownNames.has(name) && todayOrders[name] > 0) {
-      const qty = todayOrders[name];
-      const b = calcBox(qty);
-      rows.push(["其他", name, qty, qty*5, b.type, b.count]);
-      totalPkg += qty;
+      rows.push([s.r, s.n, qty, qty*5, b.type, b.count]);
+    } else {
+      rows.push([s.r, s.n, 0, 0, "-", "-"]);
     }
   });
-  rows.push(["", "合計", totalPkg, totalPkg*5, "", ""]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{wch:6},{wch:14},{wch:12},{wch:10},{wch:6},{wch:6}];
   XLSX.utils.book_append_sheet(wb, ws, currentDate.replace(/-/g,""));
-
-  // Sheet 2：未下單門市
-  const notOrdered = STORES.filter(s => !todayOrders[s.n]);
-  if (notOrdered.length) {
-    const ws2 = XLSX.utils.aoa_to_sheet([
-      ["區域","門市"],
-      ...notOrdered.map(s => [s.r, s.n])
-    ]);
-    ws2["!cols"] = [{wch:6},{wch:14}];
-    XLSX.utils.book_append_sheet(wb, ws2, "未下單");
-  }
 
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
