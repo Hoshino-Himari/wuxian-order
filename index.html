@@ -281,13 +281,18 @@ function getNextShipDate() {
   const today = new Date();
   const dow = today.getDay(); // 0=日,1=一,2=二,...,6=六
   const orderDays = new Set([1, 3, 5]); // 一三五
+  const shipDays = new Set([2, 4, 6]);  // 二四六
   if (orderDays.has(dow)) {
     // 今天是下單日，出貨日是明天
     const d = new Date(today);
     d.setDate(d.getDate() + 1);
     return d;
   }
-  // 不是下單日，找下一個下單日的隔天
+  if (shipDays.has(dow)) {
+    // 今天是出貨日，追加的單仍算這批
+    return new Date(today);
+  }
+  // 日（休息日），找下一個下單日的隔天
   for (let i = 1; i <= 7; i++) {
     const d = new Date(today);
     d.setDate(d.getDate() + i);
