@@ -526,6 +526,12 @@ function exportExcel() {
   toast("✓ Excel 已下載");
 }
 
+// ── LINE 別名對照（LINE 訊息常用簡稱 → 系統正式名稱）────
+const STORE_ALIASES = {
+  "自強店":   "旗艦店",
+  "大里店":   "大里中興店",
+};
+
 // ── LINE 叫貨紀錄匯入 ──────────────────────────────────
 
 function initLineOrderDate() {
@@ -553,6 +559,8 @@ function parseLineText() {
   const text = document.getElementById("lineText").value;
   const lines = text.split("\n");
   const storeNames = STORES.map(s => s.n);
+  // 正式名稱 + 別名都列入搜尋
+  const aliasKeys = Object.keys(STORE_ALIASES);
   const result = {};
   const unknown = [];
 
@@ -560,8 +568,14 @@ function parseLineText() {
     const line = raw.trim();
     if (!line) return;
 
-    // 找出哪個門市名稱出現在這行
-    const matched = storeNames.find(n => line.includes(n));
+    // 先試別名，再試正式名稱
+    let matched = aliasKeys.find(a => line.includes(a));
+    if (matched) {
+      matched = STORE_ALIASES[matched];  // 轉成正式名稱
+    } else {
+      matched = storeNames.find(n => line.includes(n));
+    }
+
     if (!matched) {
       // 可能是 LINE 系統訊息或空白，略過常見模式
       if (/^\[/.test(line) || /^-+$/.test(line) || /^\d{1,2}:\d{2}/.test(line)) return;
