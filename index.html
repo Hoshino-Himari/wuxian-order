@@ -102,15 +102,11 @@
   <!-- LINE 上傳 -->
   <div class="card">
     <div class="section-title">📱 LINE 叫貨紀錄匯入</div>
-    <div style="margin-bottom:10px;">
-      <label for="lineImportDate" style="margin-bottom:6px;font-size:0.88rem;color:#555;">選擇下單日</label>
-      <input type="date" id="lineImportDate" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:0.92rem;font-family:inherit;">
-    </div>
     <label style="display:flex;align-items:center;justify-content:center;gap:8px;background:#6a1b9a;color:white;border-radius:10px;padding:13px;font-size:1rem;font-weight:700;cursor:pointer;letter-spacing:.04em;">
       📂 選擇 LINE 匯出檔案（.txt）
       <input type="file" id="lineFileInput" accept=".txt" style="display:none" onchange="handleLineFile(event)">
     </label>
-    <div style="margin-top:8px;font-size:0.8rem;color:#999;text-align:center;">選好下單日再選檔案，系統會自動計算出貨日</div>
+    <div style="margin-top:8px;font-size:0.8rem;color:#999;text-align:center;">上傳後可選擇要匯入哪幾天的訂單</div>
   </div>
 
   <!-- 填單區 -->
@@ -333,7 +329,6 @@ window.onload = () => {
 
   const todayStr = fmtDate(new Date());
   const openList = activeStores(todayStr);
-  document.getElementById("lineImportDate").value = todayStr;
 
   const dl = document.getElementById("storeDatalist");
   openList.forEach(s => { const o = document.createElement("option"); o.value = s.n; dl.appendChild(o); });
@@ -493,22 +488,20 @@ function toast(msg) {
 }
 
 // ── LINE 訂單匯入 ─────────────────────────────────────────
-let _parsedLineOrders = [];
+let _parsedLineOrders = [];   // 所有解析出的訂單
 
 function handleLineFile(evt) {
   const file = evt.target.files[0]; evt.target.value = "";
   if (!file) return;
-  const selectedDate = document.getElementById("lineImportDate").value;
-  if (!selectedDate) { toast("請先選擇要匯入的下單日"); return; }
   const reader = new FileReader();
   reader.onload = e => {
-    _parsedLineOrders = parseLineOrders(e.target.result, selectedDate);
-    showLineModal(selectedDate);
+    _parsedLineOrders = parseLineOrders(e.target.result);
+    showLineModal();
   };
   reader.readAsText(file, "UTF-8");
 }
 
-function parseLineOrders(text, selectedOrderDate) {
+function parseLineOrders(text) {
   const lines = text.split(/\r?\n/);
   let activeOrderDate = "";
   let blocks = [], cur = null;
@@ -538,7 +531,7 @@ function parseLineOrders(text, selectedOrderDate) {
 
   const orders = [];
   for (const b of blocks) {
-    if (!b.orderDate || b.orderDate !== selectedOrderDate) continue;
+    if (!b.orderDate) continue;
     const t = b.text;
     const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
     if (!qM) continue;
@@ -552,7 +545,6 @@ function parseLineOrders(text, selectedOrderDate) {
       if (fm) rawStore = fm[1];
     }
 
-    // 店名必須以「店」結尾
     if (rawStore && !rawStore.endsWith("店")) {
       const m = rawStore.match(/(\S+店)/);
       rawStore = m ? m[1] : "";
@@ -578,38 +570,50 @@ function matchStoreName(raw) {
   return found ? found.n : null;
 }
 
-function showLineModal(selectedOrderDate) {
-  if (!_parsedLineOrders.length) { toast(`${fmtShort(selectedOrderDate)} 找不到訂單，請確認日期或 LINE 匯出檔`); return; }
+function showLineModal() {
+  if (!_parsedLineOrders.length) { toast("找不到訂單，請確認 LINE 匯出檔格式"); return; }
 
-  const byDate = {};
-  _parsedLineOrders.forEach(o => { if (!byDate[o.shipDate]) byDate[o.shipDate]=[]; byDate[o.shipDate].push(o); });
+  // 以下單日分組
+  const byOrderDate = {};
+  _parsedLineOrders.forEach(o => {
+    if (!byOrderDate[o.orderDate]) byOrderDate[o.orderDate] = [];
+    byOrderDate[o.orderDate].push(o);
+  });
 
+  const dates = Object.keys(byOrderDate).sort();
   const unmatched = _parsedLineOrders.filter(o => !o.matchedName).length;
   document.getElementById("lineModalSub").textContent =
-    `${fmtShort(selectedOrderDate)} 下單，共解析 ${_parsedLineOrders.length} 筆${unmatched ? `，${unmatched} 筆店名未比對到` : ""}`;
+    `共找到 ${dates.length} 個下單日、${_parsedLineOrders.length} 筆訂單${unmatched ? `，${unmatched} 筆店名未比對到` : ""}`;
 
   let html = "";
-  for (const date of Object.keys(byDate).sort()) {
-    const rows = byDate[date];
-    html += `<div style="margin-bottom:14px;">
-      <div style="font-weight:600;font-size:0.88rem;margin-bottom:6px;">出貨日：${fmtShort(date)}（${rows.length} 筆）</div>
+  dates.forEach(orderDate => {
+    const rows = byOrderDate[orderDate];
+    const shipDate = rows[0].shipDate;
+    const checked = dates.length === 1 ? "checked" : "";
+    html += `<div style="margin-bottom:16px;border:1.5px solid #e0e0e0;border-radius:10px;overflow:hidden;">
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f5f5f5;cursor:pointer;font-weight:600;font-size:0.9rem;">
+        <input type="checkbox" class="date-check" data-order-date="${orderDate}" ${checked}
+               style="width:18px;height:18px;accent-color:#2e7d32;cursor:pointer;">
+        <span>下單日 ${fmtShort(orderDate)}　→　出貨日 ${fmtShort(shipDate)}（${rows.length} 筆）</span>
+      </label>
       <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
-        <thead><tr style="background:#f0f0f0;">
-          <th style="padding:5px 8px;text-align:left;border:1px solid #ddd;">店名</th>
-          <th style="padding:5px 8px;text-align:center;border:1px solid #ddd;">包數</th>
-          <th style="padding:5px 8px;text-align:left;border:1px solid #ddd;">比對</th>
+        <thead><tr style="background:#fafafa;">
+          <th style="padding:5px 8px;text-align:left;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">店名</th>
+          <th style="padding:5px 8px;text-align:center;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">包數</th>
+          <th style="padding:5px 8px;text-align:left;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">比對</th>
         </tr></thead><tbody>`;
     rows.forEach(o => {
       html += `<tr>
-        <td style="padding:5px 8px;border:1px solid #ddd;">${escHtml(o.rawStore)}</td>
-        <td style="padding:5px 8px;text-align:center;border:1px solid #ddd;">${o.qty}</td>
-        <td style="padding:5px 8px;border:1px solid #ddd;">${o.matchedName
+        <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${escHtml(o.rawStore)}</td>
+        <td style="padding:5px 8px;text-align:center;border-bottom:1px solid #f0f0f0;">${o.qty}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${o.matchedName
           ? `<span style="color:#2e7d32;">✓ ${escHtml(o.matchedName)}</span>`
           : `<span style="color:#c62828;">⚠ 未比對</span>`}</td>
       </tr>`;
     });
     html += `</tbody></table></div>`;
-  }
+  });
+
   document.getElementById("lineModalBody").innerHTML = html;
   document.getElementById("lineModal").style.display = "block";
 }
@@ -618,23 +622,33 @@ function closeLineModal() { document.getElementById("lineModal").style.display =
 
 async function confirmLineImport() {
   if (!_parsedLineOrders.length) return;
-  const importCount = _parsedLineOrders.length;
-  const byDate = {};
+
+  // 取得勾選的下單日
+  const checkedDates = new Set(
+    [...document.querySelectorAll(".date-check:checked")].map(el => el.dataset.orderDate)
+  );
+  if (!checkedDates.size) { toast("請至少勾選一個下單日"); return; }
+
+  // 只匯入勾選日期的訂單，按出貨日合併
+  const byShipDate = {};
   _parsedLineOrders.forEach(o => {
+    if (!checkedDates.has(o.orderDate)) return;
     const name = o.matchedName || o.rawStore;
-    if (!byDate[o.shipDate]) byDate[o.shipDate] = {};
-    byDate[o.shipDate][name] = o.qty;
+    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = {};
+    byShipDate[o.shipDate][name] = o.qty;
   });
+
+  const importCount = Object.values(byShipDate).reduce((s, stores) => s + Object.keys(stores).length, 0);
   const btn = document.getElementById("lineConfirmBtn");
   btn.disabled = true; btn.textContent = "匯入中…";
   try {
-    await Promise.all(Object.entries(byDate).map(([date, stores]) =>
+    await Promise.all(Object.entries(byShipDate).map(([date, stores]) =>
       db.collection("orders_wuxian").doc(`五鮮級_${date}`).set(
         { stores, date, updatedAt: new Date().toISOString() }, { merge: true }
       )
     ));
     closeLineModal();
-    toast(`已匯入 ${importCount} 筆訂單`);
+    toast(`已匯入 ${importCount} 筆訂單（${checkedDates.size} 個下單日）`);
   } catch(e) {
     toast("匯入失敗：" + e.message);
     btn.disabled = false; btn.textContent = "✓ 確認匯入";
