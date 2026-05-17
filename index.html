@@ -437,7 +437,7 @@ function renderOrderList() {
 " style="border:none;background:none;color:#ccc;font-size:1.1rem;cursor:pointer;padding:0;line-height:1;" title="移除">✕</button>
         </span>
       </div>`).join("")
-          + `<div class="order-total"><span>共 ${ordered.length} 家</span><span>${total} 包</span></div>`;
+          + `<div class="order-total"><span>共 ${ordered.length} 家</span><span>${total} 包 / ${total*5} 斤</span></div>`;
   }
 
   if (pending.length) {
