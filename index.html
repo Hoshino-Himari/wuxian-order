@@ -642,11 +642,14 @@ async function confirmLineImport() {
   const btn = document.getElementById("lineConfirmBtn");
   btn.disabled = true; btn.textContent = "匯入中…";
   try {
-    await Promise.all(Object.entries(byShipDate).map(([date, stores]) =>
-      db.collection("orders_wuxian").doc(`五鮮級_${date}`).set(
-        { stores, date, updatedAt: new Date().toISOString() }, { merge: true }
-      )
-    ));
+    await Promise.all(Object.entries(byShipDate).map(([date, stores]) => {
+      const docRef = db.collection("orders_wuxian").doc(`五鮮級_${date}`);
+      // 用 dot-notation update 逐筆合併，不覆蓋既有資料
+      const updates = { date, updatedAt: new Date().toISOString() };
+      Object.entries(stores).forEach(([name, qty]) => { updates[`stores.${name}`] = qty; });
+      return docRef.set({ date, updatedAt: updates.updatedAt }, { merge: true })
+                   .then(() => docRef.update(updates));
+    }));
     closeLineModal();
     toast(`已匯入 ${importCount} 筆訂單（${checkedDates.size} 個下單日）`);
   } catch(e) {
