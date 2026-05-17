@@ -358,6 +358,11 @@ function parseLineOrders(text) {
       const fm = firstLine.match(/五鮮級[\s-]?(\S+店)/) || firstLine.match(/(\S+店)\s*$/);
       if (fm) rawStore = fm[1];
     }
+    // 店名必須以「店」結尾，否則是解析錯誤
+    if (rawStore && !rawStore.endsWith("店")) {
+      const m = rawStore.match(/(\S+店)/);
+      rawStore = m ? m[1] : "";
+    }
     if (!rawStore) continue;
 
     const qty = parseInt(qM[1]);
