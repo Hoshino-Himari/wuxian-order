@@ -66,11 +66,8 @@
                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
 
     /* 管理員區塊 */
-    .admin-toggle { text-align: center; margin-bottom: 12px; }
     .btn-link { background: none; border: none; color: #999; font-size: 0.82rem;
                 cursor: pointer; text-decoration: underline; }
-    .admin-panel { display: none; }
-    .admin-panel.open { display: block; }
     .admin-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .btn-sm { padding: 9px 16px; border: none; border-radius: 8px; font-size: 0.88rem;
               cursor: pointer; font-weight: 600; }
@@ -84,8 +81,6 @@
     .date-set-row input[type=date]:focus { outline: none; border-color: #1e6b3e; }
 
     /* LINE 匯入 */
-    .line-import-section { margin-top: 18px; border-top: 1.5px solid #e8f5e9; padding-top: 16px; }
-    .line-import-section .section-title { margin-bottom: 10px; }
     .line-date-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
     .line-date-row label { font-size: 0.88rem; color: #555; white-space: nowrap; margin: 0; font-weight: 600; }
     .line-date-row input[type=date] { flex: 1; padding: 9px 12px; border: 1.5px solid #ddd;
@@ -123,6 +118,22 @@
 </header>
 
 <div class="main">
+
+  <!-- LINE 叫貨紀錄匯入 -->
+  <div class="card">
+    <div class="section-title">📋 LINE 叫貨紀錄匯入</div>
+    <div class="line-date-row">
+      <label>下單日：</label>
+      <input type="date" id="lineOrderDate" onchange="updateDeliveryHint()">
+    </div>
+    <div class="line-delivery-hint" id="lineDeliveryHint"></div>
+    <textarea class="line-textarea" id="lineText" placeholder="貼上 LINE 叫貨訊息…&#10;&#10;範例：&#10;新豐店 3&#10;員林店 2包&#10;豐原店：5"></textarea>
+    <div class="line-btn-row">
+      <button class="btn-sm btn-gray" onclick="parseLineText()">解析預覽</button>
+      <button class="btn-sm btn-blue" id="lineUploadBtn" onclick="uploadLineOrders()" style="display:none">⬆ 上傳到貨日</button>
+    </div>
+    <div class="line-preview" id="linePreview"></div>
+  </div>
 
   <!-- 填單區 -->
   <div class="card" id="formCard">
@@ -165,10 +176,8 @@
   </div>
 
   <!-- 管理員 -->
-  <div class="admin-toggle">
-    <button class="btn-link" onclick="toggleAdmin()">管理員操作 ▾</button>
-  </div>
-  <div class="admin-panel card" id="adminPanel">
+  <div class="card" id="adminPanel">
+    <div class="section-title">⚙️ 管理員操作</div>
     <div class="date-set-row">
       <input type="date" id="adminDate">
       <button class="btn-sm btn-gray" onclick="changeDate()">切換日期</button>
@@ -178,22 +187,6 @@
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
-
-    <!-- LINE 叫貨紀錄匯入 -->
-    <div class="line-import-section">
-      <div class="section-title">📋 LINE 叫貨紀錄匯入</div>
-      <div class="line-date-row">
-        <label>下單日：</label>
-        <input type="date" id="lineOrderDate" onchange="updateDeliveryHint()">
-      </div>
-      <div class="line-delivery-hint" id="lineDeliveryHint"></div>
-      <textarea class="line-textarea" id="lineText" placeholder="貼上 LINE 叫貨訊息…&#10;&#10;範例：&#10;新豐店 3&#10;員林店 2包&#10;豐原店：5"></textarea>
-      <div class="line-btn-row">
-        <button class="btn-sm btn-gray" onclick="parseLineText()">解析預覽</button>
-        <button class="btn-sm btn-blue" id="lineUploadBtn" onclick="uploadLineOrders()" style="display:none">⬆ 上傳到貨日</button>
-      </div>
-      <div class="line-preview" id="linePreview"></div>
-    </div>
   </div>
 
 </div>
@@ -332,6 +325,8 @@ window.onload = () => {
   document.getElementById("qtyInput").addEventListener("keydown", e => {
     if (e.key === "Enter") submitOrder();
   });
+
+  initLineOrderDate();
 };
 
 function fmtDate(d) { return d.toISOString().slice(0,10); }
@@ -456,12 +451,6 @@ function renderOrderList() {
 }
 
 // ── 管理員 ────────────────────────────────────────────
-function toggleAdmin() {
-  const panel = document.getElementById("adminPanel");
-  const wasOpen = panel.classList.contains("open");
-  panel.classList.toggle("open");
-  if (!wasOpen) initLineOrderDate();
-}
 
 function changeDate() {
   const d = document.getElementById("adminDate").value;
