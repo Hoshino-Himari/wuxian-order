@@ -82,6 +82,28 @@
     .date-set-row input[type=date] { flex: 1; padding: 9px 12px; border: 1.5px solid #ddd;
                                       border-radius: 8px; font-size: 0.92rem; font-family: inherit; }
     .date-set-row input[type=date]:focus { outline: none; border-color: #1e6b3e; }
+
+    /* LINE 匯入 */
+    .line-import-section { margin-top: 18px; border-top: 1.5px solid #e8f5e9; padding-top: 16px; }
+    .line-import-section .section-title { margin-bottom: 10px; }
+    .line-date-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .line-date-row label { font-size: 0.88rem; color: #555; white-space: nowrap; margin: 0; font-weight: 600; }
+    .line-date-row input[type=date] { flex: 1; padding: 9px 12px; border: 1.5px solid #ddd;
+                                       border-radius: 8px; font-size: 0.92rem; font-family: inherit; }
+    .line-date-row input[type=date]:focus { outline: none; border-color: #1e6b3e; }
+    .line-delivery-hint { font-size: 0.8rem; color: #1e6b3e; margin-bottom: 10px; }
+    .line-textarea { width: 100%; min-height: 120px; padding: 10px 12px; border: 1.5px solid #ddd;
+                     border-radius: 10px; font-size: 0.88rem; font-family: inherit; resize: vertical;
+                     background: #fafafa; color: #222; }
+    .line-textarea:focus { outline: none; border-color: #1e6b3e; background: white; }
+    .line-preview { margin-top: 10px; background: #f5faf6; border-radius: 10px; padding: 12px 14px;
+                    font-size: 0.88rem; display: none; }
+    .line-preview-title { font-weight: 700; color: #1e6b3e; margin-bottom: 8px; }
+    .line-preview-item { display: flex; justify-content: space-between; padding: 4px 0;
+                         border-bottom: 1px solid #e0f0e3; }
+    .line-preview-item:last-child { border-bottom: none; }
+    .line-preview-warn { color: #e65100; font-size: 0.82rem; margin-top: 6px; }
+    .line-btn-row { display: flex; gap: 8px; margin-top: 10px; }
     .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
                 background: #4caf50; margin-right: 5px; animation: blink 1.5s infinite; }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -156,6 +178,22 @@
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
+
+    <!-- LINE 叫貨紀錄匯入 -->
+    <div class="line-import-section">
+      <div class="section-title">📋 LINE 叫貨紀錄匯入</div>
+      <div class="line-date-row">
+        <label>下單日：</label>
+        <input type="date" id="lineOrderDate" onchange="updateDeliveryHint()">
+      </div>
+      <div class="line-delivery-hint" id="lineDeliveryHint"></div>
+      <textarea class="line-textarea" id="lineText" placeholder="貼上 LINE 叫貨訊息…&#10;&#10;範例：&#10;新豐店 3&#10;員林店 2包&#10;豐原店：5"></textarea>
+      <div class="line-btn-row">
+        <button class="btn-sm btn-gray" onclick="parseLineText()">解析預覽</button>
+        <button class="btn-sm btn-blue" id="lineUploadBtn" onclick="uploadLineOrders()" style="display:none">⬆ 上傳到貨日</button>
+      </div>
+      <div class="line-preview" id="linePreview"></div>
+    </div>
   </div>
 
 </div>
@@ -420,7 +458,9 @@ function renderOrderList() {
 // ── 管理員 ────────────────────────────────────────────
 function toggleAdmin() {
   const panel = document.getElementById("adminPanel");
+  const wasOpen = panel.classList.contains("open");
   panel.classList.toggle("open");
+  if (!wasOpen) initLineOrderDate();
 }
 
 function changeDate() {
@@ -484,6 +524,129 @@ function exportExcel() {
 
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── LINE 叫貨紀錄匯入 ──────────────────────────────────
+
+function initLineOrderDate() {
+  const today = new Date();
+  document.getElementById("lineOrderDate").value = fmtDate(today);
+  updateDeliveryHint();
+}
+
+function updateDeliveryHint() {
+  const val = document.getElementById("lineOrderDate").value;
+  if (!val) { document.getElementById("lineDeliveryHint").textContent = ""; return; }
+  const d = new Date(val + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  const [y,m,dy] = fmtDate(d).split("-");
+  document.getElementById("lineDeliveryHint").textContent =
+    `→ 將上傳至到貨日：${y}年${parseInt(m)}月${parseInt(dy)}日`;
+  document.getElementById("linePreview").style.display = "none";
+  document.getElementById("lineUploadBtn").style.display = "none";
+}
+
+let _parsedLineOrders = {};   // { storeName: qty }
+let _parsedUnknown = [];      // unrecognized lines
+
+function parseLineText() {
+  const text = document.getElementById("lineText").value;
+  const lines = text.split("\n");
+  const storeNames = STORES.map(s => s.n);
+  const result = {};
+  const unknown = [];
+
+  lines.forEach(raw => {
+    const line = raw.trim();
+    if (!line) return;
+
+    // 找出哪個門市名稱出現在這行
+    const matched = storeNames.find(n => line.includes(n));
+    if (!matched) {
+      // 可能是 LINE 系統訊息或空白，略過常見模式
+      if (/^\[/.test(line) || /^-+$/.test(line) || /^\d{1,2}:\d{2}/.test(line)) return;
+      unknown.push(line);
+      return;
+    }
+
+    // 從這行取出數字（優先取門市名稱後面的數字）
+    const after = line.slice(line.indexOf(matched) + matched.length);
+    const numMatch = after.match(/(\d+)/) || line.match(/(\d+)/);
+    const qty = numMatch ? parseInt(numMatch[1]) : 0;
+    if (qty > 0) {
+      result[matched] = (result[matched] || 0) + qty;
+    } else {
+      unknown.push(line);
+    }
+  });
+
+  _parsedLineOrders = result;
+  _parsedUnknown = unknown;
+
+  const preview = document.getElementById("linePreview");
+  const uploadBtn = document.getElementById("lineUploadBtn");
+  const entries = Object.entries(result);
+
+  if (!entries.length && !unknown.length) {
+    preview.style.display = "block";
+    preview.innerHTML = '<div style="color:#999;font-size:0.88rem;">未解析到任何訂單，請確認格式。</div>';
+    uploadBtn.style.display = "none";
+    return;
+  }
+
+  const totalQty = entries.reduce((s, [,q]) => s + q, 0);
+  let html = `<div class="line-preview-title">解析結果：${entries.length} 家 / ${totalQty} 包</div>`;
+  entries.forEach(([n, q]) => {
+    html += `<div class="line-preview-item"><span>${n}</span><span>${q} 包</span></div>`;
+  });
+  if (unknown.length) {
+    html += `<div class="line-preview-warn">⚠ 無法辨識 ${unknown.length} 行（已略過）：<br>` +
+      unknown.slice(0,5).map(l => `・${l}`).join("<br>") +
+      (unknown.length > 5 ? `<br>…等 ${unknown.length} 行` : "") + "</div>";
+  }
+
+  preview.style.display = "block";
+  preview.innerHTML = html;
+  uploadBtn.style.display = entries.length ? "block" : "none";
+}
+
+async function uploadLineOrders() {
+  const orderDate = document.getElementById("lineOrderDate").value;
+  if (!orderDate) { toast("請選擇下單日"); return; }
+
+  const d = new Date(orderDate + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  const deliveryDate = fmtDate(d);
+
+  const entries = Object.entries(_parsedLineOrders);
+  if (!entries.length) { toast("沒有可上傳的訂單"); return; }
+
+  const btn = document.getElementById("lineUploadBtn");
+  btn.disabled = true;
+  btn.textContent = "上傳中…";
+
+  const docId = `五鮮級_${deliveryDate}`;
+  const stores = {};
+  entries.forEach(([n, q]) => { stores[n] = q; });
+
+  try {
+    await db.collection("orders_wuxian").doc(docId).set(
+      { stores, date: deliveryDate, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    toast(`✓ 已上傳 ${entries.length} 家訂單 → ${deliveryDate} 到貨日`);
+    document.getElementById("linePreview").style.display = "none";
+    document.getElementById("lineText").value = "";
+    btn.style.display = "none";
+    // 切換到剛上傳的到貨日
+    setDate(deliveryDate);
+    document.getElementById("adminDate").value = deliveryDate;
+  } catch(e) {
+    toast("上傳失敗：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⬆ 上傳到貨日";
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────
