@@ -132,14 +132,19 @@
     <button class="btn-edit" onclick="resetForm()">修改 / 重新填寫</button>
   </div>
 
-  <!-- 今日訂單 -->
+  <!-- 訂單 + 日期切換 -->
   <div class="card">
-    <div class="section-title">
-      <span class="live-dot"></span>今日訂單
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="section-title" style="margin-bottom:0"><span class="live-dot"></span>訂單紀錄</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="date" id="adminDate" style="padding:5px 8px;border:1.5px solid #ddd;border-radius:8px;font-size:0.85rem;font-family:inherit;">
+        <button class="btn-sm btn-gray" style="padding:6px 10px;font-size:0.82rem;" onclick="changeDate()">切換</button>
+      </div>
     </div>
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
     </div>
+    <button class="btn-sm btn-blue" style="margin-top:12px;width:100%;" onclick="exportExcel()">⬇ 下載 Excel</button>
   </div>
 
   <!-- 管理員 -->
@@ -147,13 +152,8 @@
     <button class="btn-link" onclick="toggleAdmin()">管理員操作 ▾</button>
   </div>
   <div class="admin-panel card" id="adminPanel">
-    <div class="date-set-row">
-      <input type="date" id="adminDate">
-      <button class="btn-sm btn-gray" onclick="changeDate()">切換日期</button>
-    </div>
     <div class="admin-row">
-      <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
-      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
+      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日所有訂單</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
   </div>
@@ -254,16 +254,37 @@ if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 // ── 狀態 ─────────────────────────────────────────────
-let currentDate = "";       // YYYY-MM-DD，to 到貨日
+let currentDate = "";       // YYYY-MM-DD，出貨日
 let todayOrders = {};       // { storeName: qty }
 let unsubscribe = null;
 
+// ── 計算出貨日（一三五下單 → 二四六出貨）─────────────
+function getNextShipDate() {
+  const today = new Date();
+  const dow = today.getDay(); // 0=日,1=一,2=二,...,6=六
+  const orderDays = new Set([1, 3, 5]); // 一三五
+  if (orderDays.has(dow)) {
+    // 今天是下單日，出貨日是明天
+    const d = new Date(today);
+    d.setDate(d.getDate() + 1);
+    return d;
+  }
+  // 不是下單日，找下一個下單日的隔天
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    if (orderDays.has(d.getDay())) {
+      d.setDate(d.getDate() + 1);
+      return d;
+    }
+  }
+  // fallback
+  const d = new Date(today); d.setDate(d.getDate() + 1); return d;
+}
+
 // ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
-  // 預設明天
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  setDate(fmtDate(tomorrow));
+  setDate(fmtDate(getNextShipDate()));
 
   // datalist（文字輸入autocomplete）
   const dl = document.getElementById("storeDatalist");
@@ -300,7 +321,7 @@ function fmtDate(d) { return d.toISOString().slice(0,10); }
 function fmtDateCN(str) {
   if (!str) return "";
   const [y,m,d] = str.split("-");
-  return `${y}年${parseInt(m)}月${parseInt(d)}日 到貨`;
+  return `${y}年${parseInt(m)}月${parseInt(d)}日 出貨`;
 }
 
 function setDate(dateStr) {
