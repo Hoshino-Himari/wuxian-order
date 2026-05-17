@@ -566,10 +566,6 @@ function parseLineOrders(text) {
       if (found) rawStore = found.n;
     }
 
-    if (rawStore && !rawStore.endsWith("店")) {
-      const m = rawStore.match(/(\S+店)/);
-      rawStore = m ? m[1] : "";
-    }
     if (!rawStore) continue;
 
     const qty = parseInt(qM[1]);
@@ -585,6 +581,8 @@ function parseLineOrders(text) {
 const STORE_ALIASES = {
   "自強店": "旗艦店",
   "大里店": "中興店",
+  "岡山":   "岡山旗艦店",
+  "鼓山店": "新鼓山店",
 };
 
 function matchStoreName(raw) {
