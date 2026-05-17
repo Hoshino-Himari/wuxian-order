@@ -156,13 +156,9 @@
   <!-- 管理員 -->
   <div class="card" id="adminPanel">
     <div class="section-title">⚙️ 管理員操作</div>
-    <div class="date-set-row">
-      <input type="date" id="adminDateSwitch">
-      <button class="btn-sm btn-gray" onclick="adminSwitchDate()">切換日期</button>
-    </div>
     <div class="admin-row">
       <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
-      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
+      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日（刪除測試用，勿按）</button>
     </div>
   </div>
 
@@ -352,7 +348,6 @@ window.onload = () => {
 function setViewDate(dateStr) {
   currentDate = dateStr;
   document.getElementById("adminDate").value = dateStr;
-  document.getElementById("adminDateSwitch").value = dateStr;
   if (unsubscribe) unsubscribe();
   unsubscribe = db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`).onSnapshot(snap => {
     const data = snap.exists ? snap.data() : {};
@@ -467,10 +462,6 @@ function removeStoreOrder(storeName) {
 }
 
 // ── 管理員 ────────────────────────────────────────────────
-function adminSwitchDate() {
-  const d = document.getElementById("adminDateSwitch").value;
-  if (d) { setViewDate(d); toast(`切換到 ${fmtShort(d)}`); }
-}
 
 function clearDate() {
   if (!confirm(`確定清除 ${fmtShort(currentDate)} 所有訂單？`)) return;
