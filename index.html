@@ -551,13 +551,19 @@ function parseLineOrders(text) {
     const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
     if (!qM) continue;
 
-    const sM = t.match(/店[\s　]*名[：:]\s*([^\n]*)/);
+    const sM = t.match(/店[\s　]*名[：:]\s*([^\n]+)/);
     let rawStore = sM ? sM[1].trim() : "";
 
     if (!rawStore) {
-      const firstLine = t.split("\n")[0];
-      const fm = firstLine.match(/五鮮級[\s-]?(\S+店)/);
+      // 整段訊息都找「五鮮級xxx店」
+      const fm = t.match(/五鮮級[\s-]?(\S+店)/);
       if (fm) rawStore = fm[1];
+    }
+
+    if (!rawStore) {
+      // 最後備援：整段訊息有沒有直接出現已知店名
+      const found = STORES.find(s => t.includes(s.n));
+      if (found) rawStore = found.n;
     }
 
     if (rawStore && !rawStore.endsWith("店")) {
