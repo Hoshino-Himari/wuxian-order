@@ -128,6 +128,10 @@
         <button class="qty-btn" onclick="adjustQty(1)">+</button>
       </div>
     </div>
+    <div class="qty-wrap">
+      <label>出貨日</label>
+      <input type="date" id="manualShipDate" style="font-size:1rem;">
+    </div>
     <button class="btn-submit" id="submitBtn" onclick="submitOrder()">送出下單</button>
   </div>
 
@@ -341,6 +345,8 @@ window.onload = () => {
     sel.appendChild(grp);
   });
 
+  document.getElementById("manualShipDate").value = shipDate;
+
   document.getElementById("storeInput").addEventListener("keydown", e => { if (e.key==="Enter") document.getElementById("qtyInput").focus(); });
   document.getElementById("qtyInput").addEventListener("keydown",  e => { if (e.key==="Enter") submitOrder(); });
 };
@@ -374,22 +380,24 @@ function adjustQty(delta) {
 }
 
 async function submitOrder() {
-  const store = document.getElementById("storeInput").value.trim() || document.getElementById("storeSelect").value;
-  const qty   = parseInt(document.getElementById("qtyInput").value) || 0;
+  const store    = document.getElementById("storeInput").value.trim() || document.getElementById("storeSelect").value;
+  const qty      = parseInt(document.getElementById("qtyInput").value) || 0;
+  const orderDay = document.getElementById("manualShipDate").value || shipDate;
   if (!store) { toast("請輸入門市名稱"); return; }
   if (qty < 2) { toast("最低下單量為 2 包"); return; }
+  if (!orderDay) { toast("請選擇出貨日"); return; }
   const btn = document.getElementById("submitBtn");
   btn.disabled = true; btn.textContent = "送出中…";
   try {
-    await db.collection("orders_wuxian").doc(`五鮮級_${shipDate}`).set(
-      { stores: { [store]: qty }, date: shipDate, updatedAt: new Date().toISOString() },
+    await db.collection("orders_wuxian").doc(`五鮮級_${orderDay}`).set(
+      { stores: { [store]: qty }, date: orderDay, updatedAt: new Date().toISOString() },
       { merge: true }
     );
     document.getElementById("formCard").style.display = "none";
     document.getElementById("successCard").style.display = "block";
     document.getElementById("successTitle").textContent = `${store} 下單成功`;
     const box = calcBox(qty);
-    document.getElementById("successSub").textContent = `${qty} 包（${qty*5} 斤）｜${box.count}${box.type} 箱`;
+    document.getElementById("successSub").textContent = `${qty} 包（${qty*5} 斤）｜${box.count}${box.type} 箱　出貨日 ${fmtShort(orderDay)}`;
   } catch(e) {
     toast("送出失敗：" + e.message);
     btn.disabled = false; btn.textContent = "送出下單";
@@ -404,6 +412,7 @@ function resetForm() {
   document.getElementById("storeInput").value = "";
   document.getElementById("storeSelect").value = "";
   document.getElementById("qtyInput").value = 2;
+  document.getElementById("manualShipDate").value = shipDate;
   document.getElementById("storeInput").focus();
 }
 
