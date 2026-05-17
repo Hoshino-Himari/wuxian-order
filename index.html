@@ -566,7 +566,7 @@ function parseLineOrders(text) {
       if (found) rawStore = found.n;
     }
 
-    if (!rawStore) continue;
+    if (!rawStore || rawStore.includes("：") || rawStore.includes(":") || rawStore.length > 12) continue;
 
     const qty = parseInt(qM[1]);
     if (qty < 1) continue;
@@ -670,7 +670,8 @@ async function confirmLineImport() {
   const byShipDate = {};
   _parsedLineOrders.forEach(o => {
     if (!checkedDates.has(o.orderDate)) return;
-    const name = o.matchedName || o.rawStore;
+    if (!o.matchedName) return;  // 未比對到的不匯入
+    const name = o.matchedName;
     if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = {};
     byShipDate[o.shipDate][name] = o.qty;
   });
