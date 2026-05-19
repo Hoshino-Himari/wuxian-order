@@ -297,6 +297,8 @@ const STORE_ALIASES = {
   "燒甲五春店陽明店": "燒甲陽明店",
   "燒甲陽明": "燒甲陽明店",
   "燒甲五春店佳里店": "燒甲佳里店",
+  "燒甲五春-佳里店": "燒甲佳里店",
+  "燒甲五春 - 佳里店": "燒甲佳里店",
   "燒甲五春佳里店": "燒甲佳里店",
   "嘉義民北店": "燒甲嘉義民北店",
   "民北店": "燒甲嘉義民北店",
@@ -455,7 +457,11 @@ function shouldMoveToNextShipDate(store, defaultShipDate, content, fallbackConte
 function normalizeStoreName(raw) {
   let name = (raw || '').trim();
   name = name.replace(/^[@＠][^\s]+[\s-]*/, '').trim();
-  name = name.replace(/^(五鮮級|五鮮級-|燒甲五春|燒甲五春-|燒甲-)/, '').trim();
+  if (STORE_ALIASES[name]) return STORE_ALIASES[name];
+  const compactName = name.replace(/\s+/g, '');
+  if (STORE_ALIASES[compactName]) return STORE_ALIASES[compactName];
+  name = name.replace(/^(五鮮級|燒甲五春|燒甲)[\s-]*/, '').trim();
+  name = name.replace(/^[-－–—]+/, '').trim();
   name = name.split(/\s+/)[0];
   name = name.replace(/[，,。．.：:；;、\s]+$/g, '').trim();
   if (STORE_ALIASES[name]) return STORE_ALIASES[name];
