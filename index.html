@@ -91,6 +91,15 @@
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+
+    /* LINE 匯入 Modal */
+    .line-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; overflow-y:auto; padding:20px; }
+    .line-modal-body { max-width:480px; margin:20px auto; }
+    .line-group-row { padding:10px 0; border-bottom:1px solid #f0f0f0; }
+    .line-group-row:last-child { border-bottom:none; }
+    .line-group-label { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
+    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; }
+    .btn-green { background:#1e6b3e; color:white; }
   </style>
 </head>
 <body>
@@ -153,11 +162,26 @@
     </div>
     <div class="admin-row">
       <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
+      <button class="btn-sm btn-green" onclick="triggerLineImport()">📋 匯入 LINE</button>
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
+    <input type="file" id="lineFileInput" accept=".txt" style="display:none" onchange="handleLineFile(event)">
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
   </div>
 
+</div>
+
+<!-- LINE 匯入 Modal -->
+<div id="lineModal" class="line-modal-overlay" style="display:none">
+  <div class="card line-modal-body">
+    <div class="section-title" style="margin-bottom:8px">📋 LINE 訂單預覽</div>
+    <div id="lineModalSummary" style="font-size:0.88rem;color:#666;margin-bottom:14px"></div>
+    <div id="lineModalGroups"></div>
+    <div style="display:flex;gap:8px;margin-top:18px">
+      <button class="btn-submit" onclick="confirmLineImport()" style="padding:14px">✓ 確認匯入</button>
+      <button class="btn-sm btn-gray" onclick="closeLineModal()" style="padding:14px 20px;font-size:1rem">取消</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -484,6 +508,155 @@ function exportExcel() {
 
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── LINE 匯入 ──────────────────────────────────────────
+let _lineImportData = null;
+
+function triggerLineImport() {
+  document.getElementById('lineFileInput').value = '';
+  document.getElementById('lineFileInput').click();
+}
+
+function handleLineFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _lineImportData = parseLineText(e.target.result);
+      showLineModal(_lineImportData);
+    } catch(err) {
+      toast('解析失敗：' + err.message);
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function parseLineText(text) {
+  const lines = text.split('\n');
+  // LINE chat: each message starts with HH:MM (with or without leading zero)
+  const timeRe = /^\d{1,2}:\d{2}\s/;
+  // Date markers like "2026.05.19 星期二"
+  const dateMarkerRe = /^\d{4}\.\d{2}\.\d{2}\s+星期/;
+
+  // Split raw text into message content blocks (strip timestamp prefix)
+  const msgs = [];
+  let cur = null;
+  for (const line of lines) {
+    const trimmed = line.trimEnd();
+    if (dateMarkerRe.test(trimmed)) {
+      if (cur !== null) msgs.push(cur);
+      cur = null;
+    } else if (timeRe.test(trimmed)) {
+      if (cur !== null) msgs.push(cur);
+      cur = trimmed.replace(/^\d{1,2}:\d{2}\s+/, '');
+    } else if (cur !== null) {
+      cur += '\n' + trimmed;
+    }
+  }
+  if (cur !== null) msgs.push(cur);
+
+  const byDate = {};   // { "YYYY-MM-DD": [{store, qty}] }
+  const noOrders = []; // store names or raw content
+  const year = new Date().getFullYear();
+
+  for (const content of msgs) {
+    if (!content.trim()) continue;
+    if (content.includes('已收回訊息')) continue;
+    if (content.includes('加入聊天')) continue;
+
+    // Match an order block: needs store name, quantity, and a date field
+    const storeM = content.match(/店　名[：:]\s*(.+)/);
+    const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
+    // Accept 到貨日, 訂貨日, 下單日
+    const dateM  = content.match(/(?:到貨|訂貨|下單)日[：:]\s*(\d+)\/(\d+)/);
+
+    if (storeM && qtyM && dateM) {
+      const store = storeM[1].trim();
+      const qty   = parseInt(qtyM[1], 10);
+      const m = dateM[1].padStart(2, '0');
+      const d = dateM[2].padStart(2, '0');
+      const deliveryDate = `${year}-${m}-${d}`;
+      if (!byDate[deliveryDate]) byDate[deliveryDate] = [];
+      byDate[deliveryDate].push({ store, qty });
+      continue;
+    }
+
+    // Detect no-order notices
+    if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
+      noOrders.push(content.trim());
+    }
+  }
+
+  return { byDate, noOrders };
+}
+
+const _DOW = ['日','一','二','三','四','五','六'];
+function _dateLabelCN(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}（${_DOW[d.getDay()]}）`;
+}
+
+function showLineModal({ byDate, noOrders }) {
+  const dates = Object.keys(byDate).sort();
+  const totalOrders = dates.reduce((s, d) => s + byDate[d].length, 0);
+
+  document.getElementById('lineModalSummary').textContent =
+    `共找到 ${dates.length} 個出貨日、${totalOrders} 筆訂單、${noOrders.length} 筆無需叫貨`;
+
+  const groupsHtml = dates.length ? dates.map(dateStr => {
+    const cnt = byDate[dateStr].length;
+    return `<div class="line-group-row">
+      <label class="line-group-label">
+        <input type="checkbox" checked value="${dateStr}">
+        <span>
+          <strong>出貨日 ${_dateLabelCN(dateStr)}</strong>
+          <span style="color:#666;font-size:0.88rem">｜${cnt} 筆訂單</span>
+        </span>
+      </label>
+    </div>`;
+  }).join('') : '<div style="color:#bbb;text-align:center;padding:20px">未找到任何訂單</div>';
+
+  document.getElementById('lineModalGroups').innerHTML = groupsHtml;
+  document.getElementById('lineModal').style.display = 'block';
+}
+
+function closeLineModal() {
+  document.getElementById('lineModal').style.display = 'none';
+  _lineImportData = null;
+}
+
+async function confirmLineImport() {
+  const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
+  if (!checks.length) { toast('請勾選要匯入的出貨日'); return; }
+
+  const { byDate } = _lineImportData;
+  let imported = 0;
+
+  for (const cb of checks) {
+    const dateStr = cb.value;
+    const orders  = byDate[dateStr] || [];
+    if (!orders.length) continue;
+
+    // Merge quantities if same store appears twice
+    const stores = {};
+    orders.forEach(o => { stores[o.store] = (stores[o.store] || 0) + o.qty; });
+
+    const docId = `五鮮級_${dateStr}`;
+    await db.collection('orders_wuxian').doc(docId).set(
+      { stores, date: dateStr, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    imported++;
+  }
+
+  closeLineModal();
+  toast(`✓ 已匯入 ${imported} 個出貨日`);
+
+  // Switch view to the first imported date
+  const firstDate = [...checks][0].value;
+  setDate(firstDate);
 }
 
 // ── Toast ─────────────────────────────────────────────
