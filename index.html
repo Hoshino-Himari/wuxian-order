@@ -46,6 +46,7 @@
     .btn-submit:active { background: #155230; }
     .btn-submit:disabled { background: #aaa; cursor: not-allowed; }
 
+    /* 送出成功畫面 */
     .success-card { text-align: center; padding: 30px 20px; }
     .success-icon { font-size: 3rem; margin-bottom: 10px; }
     .success-title { font-size: 1.3rem; font-weight: 700; color: #1e6b3e; margin-bottom: 6px; }
@@ -53,6 +54,7 @@
     .btn-edit { padding: 10px 24px; border: 1.5px solid #1e6b3e; color: #1e6b3e;
                 background: white; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: 600; }
 
+    /* 今日訂單列表 */
     .order-list { margin-top: 6px; }
     .order-item { display: flex; justify-content: space-between; align-items: center;
                   padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
@@ -62,12 +64,13 @@
     .no-orders { text-align: center; color: #bbb; padding: 20px 0; font-size: 0.92rem; }
     .order-total { display: flex; justify-content: space-between; padding: 10px 0 0;
                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
-    .pending-title { font-size: 0.8rem; color: #bbb; margin: 12px 0 6px; letter-spacing:.04em; }
-    .pending-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-    .pending-tag { font-size: 0.8rem; background: #f5f5f5; color: #aaa; border-radius: 6px; padding: 3px 8px; }
 
+    /* 管理員區塊 */
+    .admin-toggle { text-align: center; margin-bottom: 12px; }
     .btn-link { background: none; border: none; color: #999; font-size: 0.82rem;
                 cursor: pointer; text-decoration: underline; }
+    .admin-panel { display: none; }
+    .admin-panel.open { display: block; }
     .admin-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .btn-sm { padding: 9px 16px; border: none; border-radius: 8px; font-size: 0.88rem;
               cursor: pointer; font-weight: 600; }
@@ -88,26 +91,25 @@
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+
+    /* LINE 匯入 Modal */
+    .line-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; overflow-y:auto; padding:20px; }
+    .line-modal-body { max-width:480px; margin:20px auto; }
+    .line-group-row { padding:10px 0; border-bottom:1px solid #f0f0f0; }
+    .line-group-row:last-child { border-bottom:none; }
+    .line-group-label { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
+    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; }
+    .btn-green { background:#1e6b3e; color:white; }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>五鮮級下單</h1>
+  <h1>🦪 五鮮級下單</h1>
   <div class="date-badge" id="headerDate">載入中…</div>
 </header>
 
 <div class="main">
-
-  <!-- LINE 上傳 -->
-  <div class="card">
-    <div class="section-title">📱 LINE 叫貨紀錄匯入</div>
-    <label style="display:flex;align-items:center;justify-content:center;gap:8px;background:#6a1b9a;color:white;border-radius:10px;padding:13px;font-size:1rem;font-weight:700;cursor:pointer;letter-spacing:.04em;">
-      📂 選擇 LINE 匯出檔案（.txt）
-      <input type="file" id="lineFileInput" accept=".txt" style="display:none" onchange="handleLineFile(event)">
-    </label>
-    <div style="margin-top:8px;font-size:0.8rem;color:#999;text-align:center;">上傳後可選擇要匯入哪幾天的訂單</div>
-  </div>
 
   <!-- 填單區 -->
   <div class="card" id="formCard">
@@ -124,13 +126,9 @@
       <label>下單數量（包）</label>
       <div class="qty-row">
         <button class="qty-btn" onclick="adjustQty(-1)">−</button>
-        <input type="number" id="qtyInput" value="2" min="2" max="99" inputmode="numeric">
+        <input type="number" id="qtyInput" value="1" min="1" max="99" inputmode="numeric">
         <button class="qty-btn" onclick="adjustQty(1)">+</button>
       </div>
-    </div>
-    <div class="qty-wrap">
-      <label>出貨日</label>
-      <input type="date" id="manualShipDate" style="font-size:1rem;">
     </div>
     <button class="btn-submit" id="submitBtn" onclick="submitOrder()">送出下單</button>
   </div>
@@ -143,56 +141,48 @@
     <button class="btn-edit" onclick="resetForm()">修改 / 重新填寫</button>
   </div>
 
-  <!-- 訂單紀錄 -->
+  <!-- 今日訂單 -->
   <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <div class="section-title" style="margin-bottom:0"><span class="live-dot"></span>訂單紀錄</div>
-      <button id="datePickerBtn" onclick="openDatePicker()"
-              style="padding:5px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:0.85rem;font-family:inherit;background:#fafafa;cursor:pointer;color:#222;"></button>
+    <div class="section-title">
+      <span class="live-dot"></span>今日訂單
     </div>
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
     </div>
   </div>
 
-  <!-- 自製日曆 -->
-  <div id="calOverlay" onclick="if(event.target===this)closeDatePicker()"
-       style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:400;align-items:center;justify-content:center;">
-    <div style="background:white;border-radius:16px;padding:20px;width:310px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <button onclick="calMove(-1)" style="border:none;background:none;font-size:1.3rem;cursor:pointer;color:#444;">‹</button>
-        <span id="calTitle" style="font-weight:700;font-size:1rem;"></span>
-        <button onclick="calMove(1)"  style="border:none;background:none;font-size:1.3rem;cursor:pointer;color:#444;">›</button>
-      </div>
-      <div id="calGrid"></div>
-      <div style="margin-top:12px;font-size:0.75rem;color:#888;display:flex;gap:12px;align-items:center;">
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1e6b3e;margin-right:4px;"></span>出貨日（二四六）</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1565c0;margin-right:4px;"></span>今天</span>
-      </div>
-    </div>
-  </div>
-
   <!-- 管理員 -->
-  <div class="card" id="adminPanel">
-    <div class="section-title">⚙️ 管理員操作</div>
+  <div class="admin-toggle">
+    <button class="btn-link" onclick="toggleAdmin()">管理員操作 ▾</button>
+  </div>
+  <div class="admin-panel card" id="adminPanel">
+    <div class="date-set-row">
+      <input type="date" id="adminDate">
+      <button class="btn-sm btn-gray" onclick="changeDate()">切換日期</button>
+    </div>
     <div class="admin-row">
       <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
-      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日（刪除測試用，勿按）</button>
+      <button class="btn-sm btn-green" onclick="openLineModal()">📋 匯入 LINE</button>
+      <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
+    <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
   </div>
 
 </div>
 
-
 <!-- LINE 匯入 Modal -->
-<div id="lineModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;overflow-y:auto;padding:16px;">
-  <div style="background:white;border-radius:14px;max-width:560px;margin:0 auto;padding:20px;">
-    <div style="font-weight:700;font-size:1rem;margin-bottom:4px;">📱 LINE 訂單預覽</div>
-    <div id="lineModalSub" style="font-size:0.82rem;color:#666;margin-bottom:14px;"></div>
-    <div id="lineModalBody" style="max-height:60vh;overflow-y:auto;"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;">
-      <button id="lineConfirmBtn" style="flex:1;background:#2e7d32;color:white;border:none;border-radius:8px;padding:10px;font-size:0.9rem;font-weight:600;cursor:pointer;" onclick="confirmLineImport()">✓ 確認匯入</button>
-      <button style="flex:1;background:#eee;border:none;border-radius:8px;padding:10px;font-size:0.9rem;cursor:pointer;" onclick="closeLineModal()">取消</button>
+<div id="lineModal" class="line-modal-overlay" style="display:none">
+  <div class="card line-modal-body">
+    <div class="section-title" style="margin-bottom:10px">📋 LINE 訂單匯入</div>
+    <textarea id="lineTextarea"
+      placeholder="請貼上從 LINE 複製的訊息…"
+      style="width:100%;height:150px;padding:12px;border:1.5px solid #ddd;border-radius:10px;font-size:0.88rem;font-family:inherit;resize:vertical;background:#fafafa;"
+      oninput="onLineTextInput()"></textarea>
+    <div id="lineModalSummary" style="font-size:0.88rem;color:#666;margin:10px 0 6px;min-height:1.2em"></div>
+    <div id="lineModalGroups"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-submit" id="lineImportBtn" onclick="confirmLineImport()" style="padding:14px" disabled>✓ 確認匯入</button>
+      <button class="btn-sm btn-gray" onclick="closeLineModal()" style="padding:14px 20px;font-size:1rem">取消</button>
     </div>
   </div>
 </div>
@@ -200,12 +190,14 @@
 <div id="toast"></div>
 
 <script>
+// ── 門市資料 ──────────────────────────────────────────
 const STORES = [
   { r:"新竹", n:"新豐店" },
   { r:"新竹", n:"環北店" },
   { r:"新竹", n:"旗艦店" },
 
-  { r:"台中", n:"中興店", dayOff:"週二、三" },
+  { r:"台中", n:"中興店" },
+  { r:"台中", n:"大里中興店", dayOff:"週二、三" },
   { r:"台中", n:"豐原店" },
   { r:"台中", n:"霧峰店" },
 
@@ -217,7 +209,7 @@ const STORES = [
   { r:"彰化", n:"北斗店" },
   { r:"彰化", n:"溪湖店" },
   { r:"彰化", n:"和美店" },
-  { r:"彰化", n:"彰中店" },
+  { r:"彰化", n:"中正店" },
   { r:"彰化", n:"鹿港店" },
 
   { r:"雲林", n:"斗六店" },
@@ -244,10 +236,10 @@ const STORES = [
   { r:"台南", n:"佳里店" },
   { r:"台南", n:"麻豆店" },
   { r:"台南", n:"學甲店" },
+  { r:"台南", n:"路竹店" },
 
-  { r:"高雄", n:"路竹店" },
   { r:"高雄", n:"新鼓山店" },
-  { r:"高雄", n:"建工店", closeDate:"2026-05-24" },
+  { r:"高雄", n:"建工店" },
   { r:"高雄", n:"小港店" },
   { r:"高雄", n:"鳳山店" },
   { r:"高雄", n:"七賢店" },
@@ -260,7 +252,7 @@ const STORES = [
   { r:"高雄", n:"仁武店" },
   { r:"高雄", n:"旗山店" },
   { r:"高雄", n:"林園店" },
-  { r:"高雄", n:"大昌店" },
+  { r:"高雄", n:"大昌店", phone:"07-3927380", deliveryDays:"一三五", note:"5/28開幕" },
 
   { r:"屏東", n:"東港店" },
   { r:"屏東", n:"潮州店" },
@@ -273,8 +265,7 @@ const STORES = [
   { r:"燒甲", n:"燒甲嘉義民北店" },
 ];
 
-const WEEKDAYS = ["日","一","二","三","四","五","六"];
-
+// ── Firebase ──────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyBB9jPOLfJTBcW6bu1UL-KcF5SIaHhricA",
   authDomain: "hanbaoclam-2c65e.firebaseapp.com",
@@ -286,200 +277,107 @@ const firebaseConfig = {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-let shipDate = "";    // 固定出貨日，供表單送出用
-let currentDate = ""; // 目前查看的出貨日，可切換
+// ── 狀態 ─────────────────────────────────────────────
+let currentDate = "";
 let todayOrders = {};
-let noNeedStores = {};  // { storeName: true }
 let unsubscribe = null;
 
-// ── 出貨日計算（一三五下單→二四六出貨，出貨日當天追加算同批）────
-function getNextShipDate() {
-  const today = new Date();
-  return getShipDateForOrderDate(today);
-}
-
-function getShipDateForOrderDate(orderDate) {
-  const today = new Date(orderDate);
-  const dow = today.getDay();
-  const orderDays = new Set([1, 3, 5]);
-  const shipDays  = new Set([2, 4, 6]);
-  if (orderDays.has(dow)) { const d = new Date(today); d.setDate(d.getDate()+1); return d; }
-  if (shipDays.has(dow))  { return new Date(today); }
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date(today); d.setDate(d.getDate()+i);
-    if (orderDays.has(d.getDay())) { d.setDate(d.getDate()+1); return d; }
-  }
-  const d = new Date(today); d.setDate(d.getDate()+1); return d;
-}
-
-function isOpen(store, dateStr) {
-  return !store.closeDate || dateStr < store.closeDate;
-}
-function activeStores(dateStr) {
-  return STORES.filter(s => isOpen(s, dateStr));
-}
-
-function fmtDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
-function fmtShort(str) {
-  if (!str) return "";
-  const d = new Date(str + "T00:00:00");
-  return `${d.getMonth()+1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
-}
-function escHtml(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-// ── 初始化 ───────────────────────────────────────────────
+// ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
-  shipDate = fmtDate(getNextShipDate());
-
-  // Header：固定顯示下單日→出貨日
-  const orderObj = new Date(shipDate + "T00:00:00");
-  orderObj.setDate(orderObj.getDate() - 1);
-  document.getElementById("headerDate").textContent =
-    `${fmtShort(fmtDate(orderObj))} 下單 → ${fmtShort(shipDate)} 出貨`;
-
-  setViewDate(shipDate);
-
-  const todayStr = fmtDate(new Date());
-  const openList = activeStores(todayStr);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  setDate(fmtDate(tomorrow));
 
   const dl = document.getElementById("storeDatalist");
-  openList.forEach(s => { const o = document.createElement("option"); o.value = s.n; dl.appendChild(o); });
+  STORES.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.n;
+    dl.appendChild(opt);
+  });
 
   const sel = document.getElementById("storeSelect");
-  [...new Set(openList.map(s => s.r))].forEach(r => {
-    const grp = document.createElement("optgroup"); grp.label = r;
-    openList.filter(s => s.r === r).forEach(s => {
-      const o = document.createElement("option"); o.value = s.n;
-      o.textContent = s.n + (s.dayOff ? ` (休${s.dayOff})` : "");
-      grp.appendChild(o);
+  const regions = [...new Set(STORES.map(s => s.r))];
+  regions.forEach(r => {
+    const grp = document.createElement("optgroup");
+    grp.label = r;
+    STORES.filter(s => s.r === r).forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s.n;
+      opt.textContent = s.n + (s.dayOff ? ` (休${s.dayOff})` : "");
+      grp.appendChild(opt);
     });
     sel.appendChild(grp);
   });
 
-  document.getElementById("manualShipDate").value = shipDate;
-
-  document.getElementById("storeInput").addEventListener("keydown", e => { if (e.key==="Enter") document.getElementById("qtyInput").focus(); });
-  document.getElementById("qtyInput").addEventListener("keydown",  e => { if (e.key==="Enter") submitOrder(); });
+  document.getElementById("storeInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById("qtyInput").focus();
+  });
+  document.getElementById("qtyInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") submitOrder();
+  });
 };
 
-function setViewDate(dateStr) {
+function fmtDate(d) { return d.toISOString().slice(0,10); }
+function fmtDateCN(str) {
+  if (!str) return "";
+  const [y,m,d] = str.split("-");
+  return `${y}年${parseInt(m)}月${parseInt(d)}日 到貨`;
+}
+
+function setDate(dateStr) {
   currentDate = dateStr;
-  document.getElementById("datePickerBtn").textContent = fmtShort(dateStr);
+  document.getElementById("headerDate").textContent = fmtDateCN(dateStr);
+  document.getElementById("adminDate").value = dateStr;
+  listenOrders();
+}
+
+// ── 即時監聽訂單 ──────────────────────────────────────
+function listenOrders() {
   if (unsubscribe) unsubscribe();
-  unsubscribe = db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`).onSnapshot(snap => {
-    const data = snap.exists ? snap.data() : {};
-    todayOrders  = data.stores  || {};
-    noNeedStores = data.noNeed  || {};
+  if (!currentDate) return;
+  const docId = `五鮮級_${currentDate}`;
+  unsubscribe = db.collection("orders_wuxian").doc(docId).onSnapshot(snap => {
+    todayOrders = (snap.exists && snap.data().stores) ? snap.data().stores : {};
     renderOrderList();
   });
 }
 
-function changeDate() {
-  // kept for compatibility (called nowhere now but safe to leave)
+function toggleStoreSelect() {
+  document.getElementById("storeSelect").classList.toggle("show");
 }
-
-// ── 自製日曆 ──────────────────────────────────────────────
-let _calYear, _calMonth;
-
-function openDatePicker() {
-  const d = new Date(currentDate + "T00:00:00");
-  _calYear  = d.getFullYear();
-  _calMonth = d.getMonth();
-  renderCal();
-  const ov = document.getElementById("calOverlay");
-  ov.style.display = "flex";
-}
-function closeDatePicker() {
-  document.getElementById("calOverlay").style.display = "none";
-}
-function calMove(delta) {
-  _calMonth += delta;
-  if (_calMonth < 0)  { _calMonth = 11; _calYear--; }
-  if (_calMonth > 11) { _calMonth = 0;  _calYear++; }
-  renderCal();
-}
-function renderCal() {
-  const DAYS = ["一","二","三","四","五","六","日"];
-  // 出貨日：二四六 → dayOfWeek 2,4,6
-  const SHIP_DAYS = new Set([2, 4, 6]);
-  const today = fmtDate(new Date());
-  document.getElementById("calTitle").textContent =
-    `${_calYear} 年 ${_calMonth + 1} 月`;
-
-  const firstDow = new Date(_calYear, _calMonth, 1).getDay(); // 0=Sun
-  // Convert to Mon-based index (0=Mon … 6=Sun)
-  const startOffset = (firstDow === 0 ? 6 : firstDow - 1);
-  const daysInMonth = new Date(_calYear, _calMonth + 1, 0).getDate();
-
-  let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;">`;
-  // Headers
-  DAYS.forEach((d, i) => {
-    const isShip = [1,3,5].includes(i); // 二四六 columns (0-based Mon)
-    html += `<div style="font-size:0.75rem;font-weight:700;padding:4px 0;color:${isShip ? "#1e6b3e" : "#888"};">${d}</div>`;
-  });
-  // Empty cells before 1st
-  for (let i = 0; i < startOffset; i++) html += `<div></div>`;
-  // Day cells
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${_calYear}-${String(_calMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-    const dow = new Date(dateStr + "T00:00:00").getDay(); // 0=Sun
-    const isShip    = SHIP_DAYS.has(dow);
-    const isToday   = dateStr === today;
-    const isSelected = dateStr === currentDate;
-    let bg = "transparent", color = "#222", fw = "400";
-    if (isSelected) { bg = "#1e6b3e"; color = "white"; fw = "700"; }
-    else if (isToday) { bg = "#e3f2fd"; color = "#1565c0"; fw = "700"; }
-    else if (isShip)  { color = "#1e6b3e"; fw = "600"; }
-    html += `<div onclick="pickDate('${dateStr}')"
-      style="border-radius:50%;padding:6px 2px;cursor:pointer;background:${bg};color:${color};font-weight:${fw};font-size:0.9rem;"
-      onmouseover="this.style.opacity='.7'" onmouseout="this.style.opacity='1'">${day}</div>`;
-  }
-  html += `</div>`;
-  document.getElementById("calGrid").innerHTML = html;
-}
-function pickDate(dateStr) {
-  closeDatePicker();
-  setViewDate(dateStr);
-  toast(`切換到 ${fmtShort(dateStr)}`);
-}
-
-// ── 表單 ─────────────────────────────────────────────────
-function toggleStoreSelect() { document.getElementById("storeSelect").classList.toggle("show"); }
 function storeSelectChanged() {
   const v = document.getElementById("storeSelect").value;
   if (v) document.getElementById("storeInput").value = v;
 }
-function adjustQty(delta) {
-  const el = document.getElementById("qtyInput");
-  el.value = Math.max(2, Math.min(99, (parseInt(el.value)||0) + delta));
-}
 
+// ── 送出下單 ──────────────────────────────────────────
 async function submitOrder() {
-  const store    = document.getElementById("storeInput").value.trim() || document.getElementById("storeSelect").value;
-  const qty      = parseInt(document.getElementById("qtyInput").value) || 0;
-  const orderDay = document.getElementById("manualShipDate").value || shipDate;
+  const store = document.getElementById("storeInput").value.trim()
+             || document.getElementById("storeSelect").value;
+  const qty   = parseInt(document.getElementById("qtyInput").value) || 0;
   if (!store) { toast("請輸入門市名稱"); return; }
-  if (qty < 2) { toast("最低下單量為 2 包"); return; }
-  if (!orderDay) { toast("請選擇出貨日"); return; }
+  if (qty < 1) { toast("請輸入包數"); return; }
+
   const btn = document.getElementById("submitBtn");
-  btn.disabled = true; btn.textContent = "送出中…";
+  btn.disabled = true;
+  btn.textContent = "送出中…";
+
+  const docId = `五鮮級_${currentDate}`;
   try {
-    await db.collection("orders_wuxian").doc(`五鮮級_${orderDay}`).set(
-      { stores: { [store]: qty }, date: orderDay, updatedAt: new Date().toISOString() },
+    await db.collection("orders_wuxian").doc(docId).set(
+      { stores: { [store]: qty }, date: currentDate, updatedAt: new Date().toISOString() },
       { merge: true }
     );
     document.getElementById("formCard").style.display = "none";
     document.getElementById("successCard").style.display = "block";
     document.getElementById("successTitle").textContent = `${store} 下單成功`;
     const box = calcBox(qty);
-    document.getElementById("successSub").textContent = `${qty} 包（${qty*5} 斤）｜${box.count}${box.type} 箱　出貨日 ${fmtShort(orderDay)}`;
+    document.getElementById("successSub").textContent =
+      `${qty} 包 (${qty*5} 斤）｜${box.count}${box.type} 箱`;
   } catch(e) {
     toast("送出失敗：" + e.message);
-    btn.disabled = false; btn.textContent = "送出下單";
+    btn.disabled = false;
+    btn.textContent = "送出下單";
   }
 }
 
@@ -490,345 +388,286 @@ function resetForm() {
   document.getElementById("submitBtn").textContent = "送出下單";
   document.getElementById("storeInput").value = "";
   document.getElementById("storeSelect").value = "";
-  document.getElementById("qtyInput").value = 2;
-  document.getElementById("manualShipDate").value = shipDate;
+  document.getElementById("qtyInput").value = 1;
   document.getElementById("storeInput").focus();
 }
 
-function calcBox(qty) {
-  return qty <= 2 ? { type:"D", count:1 } : { type:"C", count:Math.ceil(qty/7) };
+function adjustQty(delta) {
+  const el = document.getElementById("qtyInput");
+  const v = (parseInt(el.value) || 0) + delta;
+  el.value = Math.max(1, Math.min(99, v));
 }
 
-// ── 訂單列表 ──────────────────────────────────────────────
+function calcBox(qty) {
+  if (qty <= 2) return { type: "D", count: 1 };
+  return { type: "C", count: Math.ceil(qty / 7) };
+}
+
+// ── 渲染訂單列表 ──────────────────────────────────────
 function renderOrderList() {
   const box = document.getElementById("orderList");
   const knownNames = new Set(STORES.map(s => s.n));
-  const storeList = activeStores(currentDate);
 
-  const ordered = storeList.filter(s => todayOrders[s.n] > 0).map(s => ({ n:s.n, qty:todayOrders[s.n] }));
+  const entries = STORES
+    .filter(s => todayOrders[s.n] > 0)
+    .map(s => ({ n: s.n, qty: todayOrders[s.n] }));
   Object.keys(todayOrders).forEach(name => {
-    if (!knownNames.has(name) && todayOrders[name] > 0) ordered.push({ n:name, qty:todayOrders[name] });
+    if (!knownNames.has(name) && todayOrders[name] > 0)
+      entries.push({ n: name, qty: todayOrders[name] });
   });
 
-  const pending = storeList.filter(s => !(todayOrders[s.n] > 0));
-  let html = "";
-
-  if (!ordered.length) {
-    html += '<div class="no-orders">尚無訂單</div>';
-  } else {
-    const total = ordered.reduce((s,e) => s+e.qty, 0);
-    html += ordered.map(e => `<div class="order-item">
-        <span class="order-name">${escHtml(e.n)}</span>
-        <span style="display:flex;align-items:center;gap:8px;">
-          <span class="order-qty">${e.qty} 包</span>
-          <button onclick="removeStoreOrder('${escHtml(e.n).replace(/'/g,"\\'")}')
-" style="border:none;background:none;color:#ccc;font-size:1.1rem;cursor:pointer;padding:0;line-height:1;" title="移除">✕</button>
-        </span>
-      </div>`).join("")
-          + `<div class="order-total"><span>共 ${ordered.length} 家</span><span>${total} 包 / ${total*5} 斤</span></div>`;
+  if (!entries.length) {
+    box.innerHTML = '<div class="no-orders">尚無訂單</div>';
+    return;
   }
 
-  if (pending.length) {
-    html += `<div class="pending-title">未叫貨（${pending.length} 家）</div>
-    <div class="pending-tags">${pending.map(s => {
-      const noNeed = noNeedStores[s.n];
-      return `<span class="pending-tag">${s.n}${
-        noNeed ? `<span style="color:#1565c0;margin-left:3px;font-size:0.72rem;background:#e3f2fd;border-radius:3px;padding:0 3px;">無需</span>` : ""
-      }${s.dayOff ? `<span style="color:#e65100;margin-left:3px;font-size:0.72rem;">休${s.dayOff}</span>` : ""}</span>`;
-    }).join("")}</div>`;
-  }
-
-  box.innerHTML = html;
+  const totalPkg = entries.reduce((s, e) => s + e.qty, 0);
+  box.innerHTML = entries.map(e =>
+    `<div class="order-item">
+      <span class="order-name">${e.n}</span>
+      <span class="order-qty">${e.qty} 包</span>
+    </div>`
+  ).join("") + `<div class="order-total">
+    <span>共 ${entries.length} 家</span>
+    <span>${totalPkg} 包</span>
+  </div>`;
 }
 
-function removeStoreOrder(storeName) {
-  if (!confirm(`確定移除「${storeName}」的訂單？`)) return;
-  const docRef = db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`);
-  docRef.update({ [`stores.${storeName}`]: firebase.firestore.FieldValue.delete() })
-    .then(() => toast(`已移除 ${storeName}`))
+// ── 管理員 ────────────────────────────────────────────
+function toggleAdmin() {
+  const panel = document.getElementById("adminPanel");
+  panel.classList.toggle("open");
+}
+
+function changeDate() {
+  const d = document.getElementById("adminDate").value;
+  if (!d) return;
+  setDate(d);
+  toast(`切換到 ${fmtDateCN(d)}`);
+}
+
+function clearDate() {
+  if (!confirm(`確定清除 ${currentDate} 所有訂單？`)) return;
+  const docId = `五鮮級_${currentDate}`;
+  db.collection("orders_wuxian").doc(docId).delete()
+    .then(() => toast("已清除"))
     .catch(e => toast("失敗：" + e.message));
 }
 
-// ── 管理員 ────────────────────────────────────────────────
-
-function clearDate() {
-  if (!confirm(`確定清除 ${fmtShort(currentDate)} 所有訂單？`)) return;
-  db.collection("orders_wuxian").doc(`五鮮級_${currentDate}`).delete()
-    .then(() => toast("已清除")).catch(e => toast("失敗：" + e.message));
-}
-
+// ── 匯出 Excel ────────────────────────────────────────
 function exportExcel() {
   const wb = XLSX.utils.book_new();
-  const rows = [["區域","門市","下單量(包)","總斤數","箱型","箱數"]];
-  activeStores(currentDate).forEach(s => {
-    const qty = todayOrders[s.n] || 0;
-    const b = calcBox(qty);
-    rows.push([s.r, s.n, qty, qty*5, qty>0?b.type:"-", qty>0?b.count:"-"]);
+
+  const header = ["區域", "門市", "下單量(包)", "總斤數", "箱型", "箱數"];
+  const rows = [header];
+  const regions = [...new Set(STORES.map(s => s.r))];
+  let totalPkg = 0;
+  regions.forEach(r => {
+    STORES.filter(s => s.r === r && todayOrders[s.n] > 0).forEach(s => {
+      const qty = todayOrders[s.n];
+      const b = calcBox(qty);
+      rows.push([r, s.n, qty, qty*5, b.type, b.count]);
+      totalPkg += qty;
+    });
   });
+  const knownNames = new Set(STORES.map(s => s.n));
   Object.keys(todayOrders).forEach(name => {
-    if (!STORES.find(s => s.n===name) && todayOrders[name]>0) {
-      const qty = todayOrders[name]; const b = calcBox(qty);
+    if (!knownNames.has(name) && todayOrders[name] > 0) {
+      const qty = todayOrders[name];
+      const b = calcBox(qty);
       rows.push(["其他", name, qty, qty*5, b.type, b.count]);
+      totalPkg += qty;
     }
   });
+  rows.push(["", "合計", totalPkg, totalPkg*5, "", ""]);
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{wch:6},{wch:14},{wch:12},{wch:10},{wch:6},{wch:6}];
   XLSX.utils.book_append_sheet(wb, ws, currentDate.replace(/-/g,""));
+
+  const notOrdered = STORES.filter(s => !todayOrders[s.n]);
+  if (notOrdered.length) {
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ["區域","門市"],
+      ...notOrdered.map(s => [s.r, s.n])
+    ]);
+    ws2["!cols"] = [{wch:6},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws2, "未下單");
+  }
+
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
 }
 
-// ── Toast ─────────────────────────────────────────────────
+// ── LINE 匯入 ──────────────────────────────────────────
+let _lineImportData = null;
+let _lineDebounce  = null;
+
+function openLineModal() {
+  document.getElementById('lineTextarea').value = '';
+  document.getElementById('lineModalSummary').textContent = '';
+  document.getElementById('lineModalGroups').innerHTML = '';
+  document.getElementById('lineImportBtn').disabled = true;
+  _lineImportData = null;
+  document.getElementById('lineModal').style.display = 'block';
+  setTimeout(() => document.getElementById('lineTextarea').focus(), 50);
+}
+
+function onLineTextInput() {
+  clearTimeout(_lineDebounce);
+  _lineDebounce = setTimeout(() => {
+    const text = document.getElementById('lineTextarea').value;
+    if (!text.trim()) {
+      document.getElementById('lineModalSummary').textContent = '';
+      document.getElementById('lineModalGroups').innerHTML = '';
+      document.getElementById('lineImportBtn').disabled = true;
+      _lineImportData = null;
+      return;
+    }
+    try {
+      _lineImportData = parseLineText(text);
+      showLineModal(_lineImportData);
+    } catch(err) {
+      toast('解析失敗：' + err.message);
+    }
+  }, 300);
+}
+
+function parseLineText(text) {
+  const lines = text.split('\n');
+  const timeRe = /^\d{1,2}:\d{2}\s/;
+  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})\s+星期/;
+
+  const dateMarkers = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = dateMarkerRe.exec(lines[i].trim());
+    if (m) dateMarkers.push({ lineIndex: i, date: `${m[1]}-${m[2]}-${m[3]}` });
+  }
+
+  let startDate;
+  if (dateMarkers.length > 0) {
+    const d = new Date(dateMarkers[0].date + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    startDate = d.toISOString().slice(0, 10);
+  } else {
+    startDate = new Date().toISOString().slice(0, 10);
+  }
+
+  let currentDate = startDate;
+  let markerPtr = 0;
+  const msgs = [];
+  let cur = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (markerPtr < dateMarkers.length && dateMarkers[markerPtr].lineIndex === i) {
+      if (cur !== null) { msgs.push({ date: currentDate, content: cur }); cur = null; }
+      currentDate = dateMarkers[markerPtr].date;
+      markerPtr++;
+      continue;
+    }
+    const trimmed = lines[i].trimEnd();
+    if (timeRe.test(trimmed)) {
+      if (cur !== null) msgs.push({ date: currentDate, content: cur });
+      cur = trimmed.replace(/^\d{1,2}:\d{2}\s+/, '');
+    } else if (cur !== null) {
+      cur += '\n' + trimmed;
+    }
+  }
+  if (cur !== null) msgs.push({ date: currentDate, content: cur });
+
+  const byDate = {};
+
+  for (const { date, content } of msgs) {
+    if (!content.trim()) continue;
+    if (content.includes('已收回訊息')) continue;
+    if (content.includes('加入聊天')) continue;
+
+    if (!byDate[date]) byDate[date] = { orders: [], noOrders: [] };
+
+    const storeM = content.match(/店　名[：:]\s*(.+)/);
+    const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
+
+    if (storeM && qtyM) {
+      byDate[date].orders.push({ store: storeM[1].trim(), qty: parseInt(qtyM[1], 10) });
+    } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
+      byDate[date].noOrders.push(content.trim());
+    }
+  }
+
+  return byDate;
+}
+
+const _DOW = ['日','一','二','三','四','五','六'];
+function _dateLabelCN(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}（${_DOW[d.getDay()]}）`;
+}
+
+function showLineModal(byDate) {
+  const dates = Object.keys(byDate).sort();
+  const totalOrders   = dates.reduce((s, d) => s + byDate[d].orders.length,   0);
+  const totalNoOrders = dates.reduce((s, d) => s + byDate[d].noOrders.length, 0);
+
+  document.getElementById('lineModalSummary').textContent =
+    `共找到 ${dates.length} 個下單日、${totalOrders} 筆訂單、${totalNoOrders} 筆無需叫貨`;
+
+  const groupsHtml = dates.length ? dates.map(dateStr => {
+    const { orders, noOrders } = byDate[dateStr];
+    return `<div class="line-group-row">
+      <label class="line-group-label">
+        <input type="checkbox" checked value="${dateStr}">
+        <span>
+          <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
+          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆訂單、${noOrders.length} 筆無需</span>
+        </span>
+      </label>
+    </div>`;
+  }).join('') : '<div style="color:#bbb;text-align:center;padding:20px">未找到任何訂單</div>';
+
+  document.getElementById('lineModalGroups').innerHTML = groupsHtml;
+  document.getElementById('lineImportBtn').disabled = !dates.length;
+}
+
+function closeLineModal() {
+  document.getElementById('lineModal').style.display = 'none';
+  document.getElementById('lineTextarea').value = '';
+  _lineImportData = null;
+}
+
+async function confirmLineImport() {
+  const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
+  if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
+
+  let imported = 0;
+  for (const cb of checks) {
+    const dateStr = cb.value;
+    const { orders } = _lineImportData[dateStr] || {};
+    if (!orders || !orders.length) continue;
+
+    const stores = {};
+    orders.forEach(o => { stores[o.store] = (stores[o.store] || 0) + o.qty; });
+
+    const docId = `五鮮級_${dateStr}`;
+    await db.collection('orders_wuxian').doc(docId).set(
+      { stores, date: dateStr, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    imported++;
+  }
+
+  closeLineModal();
+  toast(`✓ 已匯入 ${imported} 個下單日`);
+  setDate([...checks][0].value);
+}
+
+// ── Toast ─────────────────────────────────────────────
 let _toastTimer;
 function toast(msg) {
   const el = document.getElementById("toast");
-  el.textContent = msg; el.style.opacity = 1;
+  el.textContent = msg;
+  el.style.opacity = 1;
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.style.opacity = 0, 2400);
-}
-
-// ── LINE 訂單匯入 ─────────────────────────────────────────
-let _parsedLineOrders = [];
-let _parsedNoNeeds = [];
-
-function handleLineFile(evt) {
-  const file = evt.target.files[0]; evt.target.value = "";
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const result = parseLineOrders(e.target.result);
-    _parsedLineOrders = result.orders;
-    _parsedNoNeeds    = result.noNeeds;
-    showLineModal();
-  };
-  reader.readAsText(file, "UTF-8");
-}
-
-function parseLineOrders(text) {
-  const lines = text.split(/\r?\n/);
-  let activeOrderDate = "";
-  let blocks = [], cur = null;
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-
-    const dh = line.match(/^(\d{4})\.(\d{2})\.(\d{2})\s+星期/);
-    if (dh) {
-      if (cur) blocks.push(cur);
-      activeOrderDate = `${dh[1]}-${dh[2]}-${dh[3]}`;
-      cur = null;
-      continue;
-    }
-
-    const mh = line.match(/^(\d{2}):(\d{2})\s+([\s\S]*)/);
-    if (mh) {
-      if (cur) blocks.push(cur);
-      cur = { text: mh[3], orderDate: activeOrderDate };
-      continue;
-    }
-
-    if (cur && !line.startsWith("上傳者：")) cur.text += "\n" + line;
-  }
-  if (cur) blocks.push(cur);
-
-  const orders = [];
-  const noNeeds = [];
-
-  for (const b of blocks) {
-    if (!b.orderDate) continue;
-    const t = b.text;
-
-    // 偵測「無須/無需叫貨」訊息
-    if (NO_NEED_RE.test(t)) {
-      const storeName = extractStoreFromText(t);
-      if (storeName) {
-        const shipDate = fmtDate(getShipDateForOrderDate(b.orderDate + "T00:00:00"));
-        noNeeds.push({ storeName, orderDate: b.orderDate, shipDate });
-      }
-      continue;
-    }
-
-    const qM = t.match(/蛤蜊[^：:\n]*[：:]\s*(\d+)/);
-    if (!qM) continue;
-
-    const sM = t.match(/店[\s　]*名[：:][^\S\n]*([^\n]+)/);
-    let rawStore = sM ? sM[1].trim() : "";
-
-    if (!rawStore) {
-      const fm = t.match(/五鮮級[\s-]?(\S+店)/);
-      if (fm) rawStore = fm[1];
-    }
-
-    if (!rawStore) {
-      const found = STORES.find(s => t.includes(s.n));
-      if (found) rawStore = found.n;
-    }
-
-    if (!rawStore || rawStore.includes("：") || rawStore.includes(":") || rawStore.length > 12) continue;
-
-    const qty = parseInt(qM[1]);
-    if (qty < 1) continue;
-
-    const shipDate = fmtDate(getShipDateForOrderDate(b.orderDate + "T00:00:00"));
-    const matchedName = matchStoreName(rawStore);
-    orders.push({ rawStore, matchedName, qty, orderDate: b.orderDate, shipDate });
-  }
-  return { orders, noNeeds };
-}
-
-function extractStoreFromText(t) {
-  // 1. 五鮮級 前綴
-  const fm = t.match(/五鮮級[\s-]?(\S+店)/);
-  if (fm) { const m = matchStoreName(fm[1]); if (m) return m; }
-  // 2. 別名（含部分比對）
-  for (const [alias, real] of Object.entries(STORE_ALIASES)) {
-    if (t.includes(alias)) return real;
-  }
-  // 3. 已知店名
-  const found = STORES.find(s => t.includes(s.n));
-  return found ? found.n : null;
-}
-
-const STORE_ALIASES = {
-  "自強店":   "旗艦店",
-  "大里店":   "中興店",
-  "岡山":     "岡山旗艦店",
-  "鼓山店":   "新鼓山店",
-  "燒甲佳里": "燒甲佳里店",
-  "燒甲陽明": "燒甲陽明店",
-  "燒甲民北": "燒甲嘉義民北店",
-  "民北":     "燒甲嘉義民北店",
-};
-
-const NO_NEED_RE = /無須叫貨|無需叫貨|今日無需|今日無須/;
-
-function matchStoreName(raw) {
-  if (!raw) return null;
-  if (STORE_ALIASES[raw]) return STORE_ALIASES[raw];
-  const norm = raw.replace(/^五鮮級[-－\s]?/, "").trim();
-  if (STORE_ALIASES[norm]) return STORE_ALIASES[norm];
-  let found = STORES.find(s => s.n === raw || s.n === norm);
-  if (found) return found.n;
-  found = STORES.find(s => norm.includes(s.n) || s.n.includes(norm));
-  return found ? found.n : null;
-}
-
-function showLineModal() {
-  if (!_parsedLineOrders.length && !_parsedNoNeeds.length) { toast("找不到訂單，請確認 LINE 匯出檔格式"); return; }
-
-  // 以下單日分組
-  const byOrderDate = {};
-  _parsedLineOrders.forEach(o => {
-    if (!byOrderDate[o.orderDate]) byOrderDate[o.orderDate] = [];
-    byOrderDate[o.orderDate].push(o);
-  });
-  // 無需叫貨也加入同一日期分組（不重複）
-  _parsedNoNeeds.forEach(o => { if (!byOrderDate[o.orderDate]) byOrderDate[o.orderDate] = []; });
-
-  const dates = Object.keys(byOrderDate).sort();
-  const unmatched = _parsedLineOrders.filter(o => !o.matchedName).length;
-  document.getElementById("lineModalSub").textContent =
-    `共找到 ${dates.length} 個下單日、${_parsedLineOrders.length} 筆訂單` +
-    (_parsedNoNeeds.length ? `、${_parsedNoNeeds.length} 筆無需叫貨` : "") +
-    (unmatched ? `，${unmatched} 筆店名未比對到` : "");
-
-  let html = "";
-  dates.forEach((orderDate, idx) => {
-    const rows = byOrderDate[orderDate];
-    const shipDate = (rows[0] || _parsedNoNeeds.find(n => n.orderDate === orderDate) || {}).shipDate || "";
-    const orderCount = rows.length;
-    const noNeedThisDate = _parsedNoNeeds.filter(n => n.orderDate === orderDate);
-    const checked = dates.length === 1 ? "checked" : "";
-    const groupId = `line-group-${idx}`;
-    html += `<div style="margin-bottom:12px;border:1.5px solid #e0e0e0;border-radius:10px;overflow:hidden;">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#f5f5f5;">
-        <input type="checkbox" class="date-check" data-order-date="${orderDate}" ${checked}
-               style="width:18px;height:18px;accent-color:#2e7d32;cursor:pointer;flex-shrink:0;">
-        <span style="flex:1;font-weight:600;font-size:0.9rem;">下單日 ${fmtShort(orderDate)} → 出貨日 ${fmtShort(shipDate)}（${orderCount} 筆訂單${noNeedThisDate.length ? `、${noNeedThisDate.length} 筆無需` : ""}）</span>
-        <button onclick="toggleLineGroup('${groupId}')" style="border:none;background:none;font-size:1rem;cursor:pointer;padding:0 4px;color:#888;" id="${groupId}-btn">▾</button>
-      </div>
-      <div id="${groupId}" style="display:none;">
-        <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
-          <thead><tr style="background:#fafafa;">
-            <th style="padding:5px 8px;text-align:left;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">店名</th>
-            <th style="padding:5px 8px;text-align:center;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">包數</th>
-            <th style="padding:5px 8px;text-align:left;border-top:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;">比對</th>
-          </tr></thead><tbody>`;
-    rows.forEach(o => {
-      html += `<tr>
-          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${escHtml(o.rawStore)}</td>
-          <td style="padding:5px 8px;text-align:center;border-bottom:1px solid #f0f0f0;">${o.qty}</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${o.matchedName
-            ? `<span style="color:#2e7d32;">✓ ${escHtml(o.matchedName)}</span>`
-            : `<span style="color:#c62828;">⚠ 未比對</span>`}</td>
-        </tr>`;
-    });
-    noNeedThisDate.forEach(o => {
-      html += `<tr style="background:#f0f7ff;">
-          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;">${escHtml(o.storeName)}</td>
-          <td style="padding:5px 8px;text-align:center;border-bottom:1px solid #f0f0f0;">—</td>
-          <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;"><span style="color:#1565c0;">無需叫貨</span></td>
-        </tr>`;
-    });
-    html += `</tbody></table></div></div>`;
-  });
-
-  document.getElementById("lineModalBody").innerHTML = html;
-  document.getElementById("lineModal").style.display = "block";
-}
-
-function toggleLineGroup(id) {
-  const el = document.getElementById(id);
-  const btn = document.getElementById(id + "-btn");
-  const open = el.style.display === "none";
-  el.style.display = open ? "block" : "none";
-  btn.textContent = open ? "▴" : "▾";
-}
-
-function closeLineModal() { document.getElementById("lineModal").style.display = "none"; _parsedLineOrders = []; _parsedNoNeeds = []; }
-
-async function confirmLineImport() {
-  if (!_parsedLineOrders.length) return;
-
-  // 取得勾選的下單日
-  const checkedDates = new Set(
-    [...document.querySelectorAll(".date-check:checked")].map(el => el.dataset.orderDate)
-  );
-  if (!checkedDates.size) { toast("請至少勾選一個下單日"); return; }
-
-  // 只匯入勾選日期的訂單，按出貨日合併
-  const byShipDate = {};
-  _parsedLineOrders.forEach(o => {
-    if (!checkedDates.has(o.orderDate)) return;
-    if (!o.matchedName) return;
-    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = { stores: {}, noNeed: {} };
-    byShipDate[o.shipDate].stores[o.matchedName] = o.qty;
-  });
-  _parsedNoNeeds.forEach(o => {
-    if (!checkedDates.has(o.orderDate)) return;
-    if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = { stores: {}, noNeed: {} };
-    byShipDate[o.shipDate].noNeed[o.storeName] = true;
-  });
-
-  const importCount = Object.values(byShipDate).reduce((s, d) => s + Object.keys(d.stores).length, 0);
-  const btn = document.getElementById("lineConfirmBtn");
-  btn.disabled = true; btn.textContent = "匯入中…";
-  try {
-    await Promise.all(Object.entries(byShipDate).map(([date, data]) => {
-      const docRef = db.collection("orders_wuxian").doc(`五鮮級_${date}`);
-      const updates = { date, updatedAt: new Date().toISOString() };
-      Object.entries(data.stores).forEach(([name, qty]) => { updates[`stores.${name}`] = qty; });
-      Object.entries(data.noNeed).forEach(([name]) => { updates[`noNeed.${name}`] = true; });
-      return docRef.set({ date, updatedAt: updates.updatedAt }, { merge: true })
-                   .then(() => docRef.update(updates));
-    }));
-    closeLineModal();
-    toast(`已匯入 ${importCount} 筆訂單（${checkedDates.size} 個下單日）`);
-  } catch(e) {
-    toast("匯入失敗：" + e.message);
-    btn.disabled = false; btn.textContent = "✓ 確認匯入";
-  }
 }
 </script>
 </body>
