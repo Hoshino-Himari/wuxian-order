@@ -151,6 +151,18 @@
     </div>
   </div>
 
+  <!-- 未叫單 -->
+  <div class="card">
+    <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleMissing()">
+      未叫單門市
+      <span id="missingCount" style="font-weight:400;color:#aaa;font-size:0.88rem"></span>
+      <span id="missingToggleIcon" style="float:right">▾</span>
+    </div>
+    <div class="order-list" id="missingList" style="display:none">
+      <div class="no-orders">載入中…</div>
+    </div>
+  </div>
+
   <!-- 管理員 -->
   <div class="admin-toggle">
     <button class="btn-link" onclick="toggleAdmin()">管理員操作 ▾</button>
@@ -264,8 +276,8 @@ const STORES = [
   { r:"屏東", n:"里港店" },
 
   { r:"燒甲", n:"燒甲佳里店" },
-  { r:"燒甲", n:"燒甲陽明店" },
-  { r:"燒甲", n:"燒甲嘉義民北店" },
+  { r:"燒甲", n:"燒甲陽明店",      dayOff:"週二、三" },
+  { r:"燒甲", n:"燒甲嘉義民北店",  dayOff:"週二、三" },
 ];
 
 // ── Firebase ──────────────────────────────────────────
@@ -284,6 +296,8 @@ const db = firebase.firestore();
 let currentDate = "";       // YYYY-MM-DD，to 到貨日
 let todayOrders = {};       // { storeName: qty }
 let unsubscribe = null;
+let _earlyOrders = {};      // { storeName: "YYYY-MM-DD" } 往後 7 天已叫
+let _earlyOrdersReady = false;
 
 // ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
@@ -334,7 +348,10 @@ function setDate(dateStr) {
   currentDate = dateStr;
   document.getElementById("headerDate").textContent = fmtDateCN(dateStr);
   document.getElementById("adminDate").value = dateStr;
+  _earlyOrders = {};
+  _earlyOrdersReady = false;
   listenOrders();
+  loadEarlyOrders();
 }
 
 // ── 即時監聽訂單 ──────────────────────────────────────
@@ -429,6 +446,7 @@ function renderOrderList() {
 
   if (!entries.length) {
     box.innerHTML = '<div class="no-orders">尚無訂單</div>';
+    renderMissingList();
     return;
   }
 
@@ -442,6 +460,7 @@ function renderOrderList() {
     <span>共 ${entries.length} 家</span>
     <span>${totalPkg} 包</span>
   </div>`;
+  renderMissingList();
 }
 
 // ── 管理員 ────────────────────────────────────────────
@@ -608,7 +627,16 @@ function parseLineText(text) {
     const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
 
     if (storeM && qtyM) {
-      byDate[date].orders.push({ store: storeM[1].trim(), qty: parseInt(qtyM[1], 10) });
+      const store = storeM[1].trim();
+      const qty   = parseInt(qtyM[1], 10);
+      // Parse explicit delivery date if present; fallback to message date
+      const dateM = content.match(/(?:到貨|訂貨)日[：:]\s*(\d+)\/(\d+)/);
+      let deliveryDate = date;
+      if (dateM) {
+        const year = new Date().getFullYear();
+        deliveryDate = `${year}-${dateM[1].padStart(2,'0')}-${dateM[2].padStart(2,'0')}`;
+      }
+      byDate[date].orders.push({ store, qty, deliveryDate });
     } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
       byDate[date].noOrders.push(content.trim());
     }
@@ -633,12 +661,21 @@ function showLineModal(byDate) {
 
   const groupsHtml = dates.length ? dates.map(dateStr => {
     const { orders, noOrders } = byDate[dateStr];
+    // Group by delivery date for sub-summary
+    const byDel = {};
+    orders.forEach(o => { byDel[o.deliveryDate] = (byDel[o.deliveryDate] || 0) + 1; });
+    const delKeys = Object.keys(byDel).sort();
+    const delSummary = delKeys.map(d =>
+      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byDel[d]}筆</span>`
+    ).join('');
+
     return `<div class="line-group-row">
       <label class="line-group-label">
         <input type="checkbox" checked value="${dateStr}">
-        <span>
+        <span style="width:100%">
           <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
-          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆訂單、${noOrders.length} 筆無需</span>
+          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
+          <br><span style="font-size:0.78rem;line-height:1.8">${delSummary}</span>
         </span>
       </label>
     </div>`;
@@ -658,26 +695,94 @@ async function confirmLineImport() {
   const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
   if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
 
-  let imported = 0;
+  // Collect all orders keyed by their actual delivery date
+  const byDelivery = {}; // { "YYYY-MM-DD": { storeName: qty } }
   for (const cb of checks) {
-    const dateStr = cb.value;
-    const { orders } = _lineImportData[dateStr] || {};
-    if (!orders || !orders.length) continue;
+    const { orders } = _lineImportData[cb.value] || {};
+    if (!orders) continue;
+    orders.forEach(o => {
+      if (!byDelivery[o.deliveryDate]) byDelivery[o.deliveryDate] = {};
+      byDelivery[o.deliveryDate][o.store] = (byDelivery[o.deliveryDate][o.store] || 0) + o.qty;
+    });
+  }
 
-    const stores = {};
-    orders.forEach(o => { stores[o.store] = (stores[o.store] || 0) + o.qty; });
-
-    const docId = `五鮮級_${dateStr}`;
-    await db.collection('orders_wuxian').doc(docId).set(
+  const deliveryDates = Object.keys(byDelivery).sort();
+  for (const dateStr of deliveryDates) {
+    const stores = byDelivery[dateStr];
+    await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
       { stores, date: dateStr, updatedAt: new Date().toISOString() },
       { merge: true }
     );
-    imported++;
   }
 
   closeLineModal();
-  toast(`✓ 已匯入 ${imported} 個下單日`);
-  setDate([...checks][0].value);
+  toast(`✓ 已存入 ${deliveryDates.length} 個出貨日`);
+  setDate(deliveryDates[0]);
+}
+
+// ── 未叫單 ────────────────────────────────────────────
+let _missingOpen = false;
+
+function toggleMissing() {
+  _missingOpen = !_missingOpen;
+  document.getElementById('missingList').style.display = _missingOpen ? 'block' : 'none';
+  document.getElementById('missingToggleIcon').textContent = _missingOpen ? '▴' : '▾';
+  if (_missingOpen) renderMissingList();
+}
+
+function renderMissingList() {
+  const countEl = document.getElementById('missingCount');
+  const listEl  = document.getElementById('missingList');
+  const ordered = new Set(Object.keys(todayOrders).filter(k => todayOrders[k] > 0));
+  const missing = STORES.filter(s => !ordered.has(s.n));
+
+  countEl.textContent = missing.length ? `（${missing.length} 家）` : '';
+
+  if (!_missingOpen) return;
+
+  if (!missing.length) {
+    listEl.innerHTML = '<div class="no-orders">所有門市今日已叫貨 ✓</div>';
+    return;
+  }
+
+  listEl.innerHTML = missing.map(s => {
+    let badge = '';
+    if (_earlyOrdersReady && _earlyOrders[s.n]) {
+      const dd = _earlyOrders[s.n];
+      const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
+      badge = `<span style="color:#2e7d32;font-size:0.78rem;margin-left:4px">✓ 已提前叫貨（出貨 ${label}）</span>`;
+    } else if (s.dayOff) {
+      badge = `<span class="dayoff-tag">${s.dayOff} 公休</span>`;
+    }
+    const isEarly = _earlyOrdersReady && _earlyOrders[s.n];
+    return `<div class="order-item">
+      <span class="order-name">${s.n}${badge}</span>
+      <span style="color:${isEarly ? '#2e7d32' : '#ddd'};font-size:0.82rem">${isEarly ? '✓' : '未叫'}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadEarlyOrders() {
+  _earlyOrders = {};
+  _earlyOrdersReady = false;
+  const base = new Date(currentDate + 'T00:00:00');
+  const reads = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    const dateStr = fmtDate(d);
+    reads.push(
+      db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).get().then(snap => {
+        if (snap.exists && snap.data().stores)
+          Object.keys(snap.data().stores).forEach(name => {
+            if (!_earlyOrders[name]) _earlyOrders[name] = dateStr;
+          });
+      })
+    );
+  }
+  await Promise.all(reads);
+  _earlyOrdersReady = true;
+  renderMissingList();
 }
 
 // ── Toast ─────────────────────────────────────────────
