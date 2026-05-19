@@ -46,6 +46,7 @@
     .btn-submit:active { background: #155230; }
     .btn-submit:disabled { background: #aaa; cursor: not-allowed; }
 
+    /* 送出成功畫面 */
     .success-card { text-align: center; padding: 30px 20px; }
     .success-icon { font-size: 3rem; margin-bottom: 10px; }
     .success-title { font-size: 1.3rem; font-weight: 700; color: #1e6b3e; margin-bottom: 6px; }
@@ -53,6 +54,7 @@
     .btn-edit { padding: 10px 24px; border: 1.5px solid #1e6b3e; color: #1e6b3e;
                 background: white; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: 600; }
 
+    /* 今日訂單列表 */
     .order-list { margin-top: 6px; }
     .order-item { display: flex; justify-content: space-between; align-items: center;
                   padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
@@ -63,6 +65,7 @@
     .order-total { display: flex; justify-content: space-between; padding: 10px 0 0;
                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
 
+    /* 管理員區塊 */
     .admin-toggle { text-align: center; margin-bottom: 12px; }
     .btn-link { background: none; border: none; color: #999; font-size: 0.82rem;
                 cursor: pointer; text-decoration: underline; }
@@ -89,12 +92,13 @@
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
 
+    /* LINE 匯入 Modal */
     .line-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; overflow-y:auto; padding:20px; }
     .line-modal-body { max-width:480px; margin:20px auto; }
     .line-group-row { padding:10px 0; border-bottom:1px solid #f0f0f0; }
     .line-group-row:last-child { border-bottom:none; }
-    .line-group-label { display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
-    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; margin-top:2px; }
+    .line-group-label { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
+    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; }
     .btn-green { background:#1e6b3e; color:white; }
   </style>
 </head>
@@ -107,6 +111,7 @@
 
 <div class="main">
 
+  <!-- 填單區 -->
   <div class="card" id="formCard">
     <div>
       <label for="storeInput">門市名稱</label>
@@ -128,6 +133,7 @@
     <button class="btn-submit" id="submitBtn" onclick="submitOrder()">送出下單</button>
   </div>
 
+  <!-- 送出成功 -->
   <div class="card success-card" id="successCard" style="display:none">
     <div class="success-icon">✅</div>
     <div class="success-title" id="successTitle">下單成功</div>
@@ -147,7 +153,7 @@
 
   <!-- 未叫單 -->
   <div class="card">
-    <div class="section-title" style="cursor:pointer;user-select:none;margin-bottom:0" onclick="toggleMissing()">
+    <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleMissing()">
       未叫單門市
       <span id="missingCount" style="font-weight:400;color:#aaa;font-size:0.88rem"></span>
       <span id="missingToggleIcon" style="float:right">▾</span>
@@ -196,6 +202,9 @@
 <div id="toast"></div>
 
 <script>
+// ── 門市資料 ──────────────────────────────────────────
+// dayOff: 固定公休（僅顯示用，不影響下單）
+// active: false → 已停業，不顯示在下拉選單
 const STORES = [
   { r:"新竹", n:"新豐店" },
   { r:"新竹", n:"環北店" },
@@ -231,6 +240,7 @@ const STORES = [
   { r:"台南", n:"大灣店" },
   { r:"台南", n:"新營店" },
   { r:"台南", n:"國平店" },
+  // 北門店 5/11 起停業
   { r:"台南", n:"仁德店" },
   { r:"台南", n:"永康店" },
   { r:"台南", n:"東平店" },
@@ -270,6 +280,7 @@ const STORES = [
   { r:"燒甲", n:"燒甲嘉義民北店",  dayOff:"週二、三" },
 ];
 
+// ── Firebase ──────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyBB9jPOLfJTBcW6bu1UL-KcF5SIaHhricA",
   authDomain: "hanbaoclam-2c65e.firebaseapp.com",
@@ -281,17 +292,21 @@ const firebaseConfig = {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-let currentDate = "";
-let todayOrders = {};
+// ── 狀態 ─────────────────────────────────────────────
+let currentDate = "";       // YYYY-MM-DD，to 到貨日
+let todayOrders = {};       // { storeName: qty }
 let unsubscribe = null;
-let _earlyOrders = {};
+let _earlyOrders = {};      // { storeName: "YYYY-MM-DD" } 往後 7 天已叫
 let _earlyOrdersReady = false;
 
+// ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
+  // 預設明天
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   setDate(fmtDate(tomorrow));
 
+  // datalist（文字輸入autocomplete）
   const dl = document.getElementById("storeDatalist");
   STORES.forEach(s => {
     const opt = document.createElement("option");
@@ -299,6 +314,7 @@ window.onload = () => {
     dl.appendChild(opt);
   });
 
+  // 下拉選單（備用）
   const sel = document.getElementById("storeSelect");
   const regions = [...new Set(STORES.map(s => s.r))];
   regions.forEach(r => {
@@ -321,7 +337,13 @@ window.onload = () => {
   });
 };
 
-function fmtDate(d) { return d.toISOString().slice(0,10); }
+function fmtDate(d) {
+  // Use local date components to avoid UTC timezone offset issues
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
 function fmtDateCN(str) {
   if (!str) return "";
   const [y,m,d] = str.split("-");
@@ -338,6 +360,7 @@ function setDate(dateStr) {
   loadEarlyOrders();
 }
 
+// ── 即時監聽訂單 ──────────────────────────────────────
 function listenOrders() {
   if (unsubscribe) unsubscribe();
   if (!currentDate) return;
@@ -348,6 +371,7 @@ function listenOrders() {
   });
 }
 
+// ── 下拉備用切換 ─────────────────────────────────────
 function toggleStoreSelect() {
   document.getElementById("storeSelect").classList.toggle("show");
 }
@@ -356,6 +380,7 @@ function storeSelectChanged() {
   if (v) document.getElementById("storeInput").value = v;
 }
 
+// ── 送出下單 ──────────────────────────────────────────
 async function submitOrder() {
   const store = document.getElementById("storeInput").value.trim()
              || document.getElementById("storeSelect").value;
@@ -373,6 +398,7 @@ async function submitOrder() {
       { stores: { [store]: qty }, date: currentDate, updatedAt: new Date().toISOString() },
       { merge: true }
     );
+    // 顯示成功
     document.getElementById("formCard").style.display = "none";
     document.getElementById("successCard").style.display = "block";
     document.getElementById("successTitle").textContent = `${store} 下單成功`;
@@ -397,21 +423,25 @@ function resetForm() {
   document.getElementById("storeInput").focus();
 }
 
+// ── 數量±按鈕 ─────────────────────────────────────────
 function adjustQty(delta) {
   const el = document.getElementById("qtyInput");
   const v = (parseInt(el.value) || 0) + delta;
   el.value = Math.max(1, Math.min(99, v));
 }
 
+// ── 計算箱型 ─────────────────────────────────────────
 function calcBox(qty) {
   if (qty <= 2) return { type: "D", count: 1 };
   return { type: "C", count: Math.ceil(qty / 7) };
 }
 
+// ── 渲染訂單列表 ──────────────────────────────────────
 function renderOrderList() {
   const box = document.getElementById("orderList");
   const knownNames = new Set(STORES.map(s => s.n));
 
+  // 照 STORES 順序排，再接不在清單的
   const entries = STORES
     .filter(s => todayOrders[s.n] > 0)
     .map(s => ({ n: s.n, qty: todayOrders[s.n] }));
@@ -439,8 +469,10 @@ function renderOrderList() {
   renderMissingList();
 }
 
+// ── 管理員 ────────────────────────────────────────────
 function toggleAdmin() {
-  document.getElementById("adminPanel").classList.toggle("open");
+  const panel = document.getElementById("adminPanel");
+  panel.classList.toggle("open");
 }
 
 function changeDate() {
@@ -458,8 +490,11 @@ function clearDate() {
     .catch(e => toast("失敗：" + e.message));
 }
 
+// ── 匯出 Excel ────────────────────────────────────────
 function exportExcel() {
   const wb = XLSX.utils.book_new();
+
+  // Sheet 1：出貨明細
   const header = ["區域", "門市", "下單量(包)", "總斤數", "箱型", "箱數"];
   const rows = [header];
   const regions = [...new Set(STORES.map(s => s.r))];
@@ -472,6 +507,7 @@ function exportExcel() {
       totalPkg += qty;
     });
   });
+  // 不在 STORES 的
   const knownNames = new Set(STORES.map(s => s.n));
   Object.keys(todayOrders).forEach(name => {
     if (!knownNames.has(name) && todayOrders[name] > 0) {
@@ -482,17 +518,212 @@ function exportExcel() {
     }
   });
   rows.push(["", "合計", totalPkg, totalPkg*5, "", ""]);
+
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{wch:6},{wch:14},{wch:12},{wch:10},{wch:6},{wch:6}];
   XLSX.utils.book_append_sheet(wb, ws, currentDate.replace(/-/g,""));
+
+  // Sheet 2：未下單門市
   const notOrdered = STORES.filter(s => !todayOrders[s.n]);
   if (notOrdered.length) {
-    const ws2 = XLSX.utils.aoa_to_sheet([["區域","門市"],...notOrdered.map(s => [s.r, s.n])]);
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ["區域","門市"],
+      ...notOrdered.map(s => [s.r, s.n])
+    ]);
     ws2["!cols"] = [{wch:6},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws2, "未下單");
   }
+
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── LINE 匯入 ──────────────────────────────────────────
+let _lineImportData = null;
+let _lineDebounce  = null;
+
+function openLineModal() {
+  document.getElementById('lineTextarea').value = '';
+  document.getElementById('lineModalSummary').textContent = '';
+  document.getElementById('lineModalGroups').innerHTML = '';
+  document.getElementById('lineImportBtn').disabled = true;
+  _lineImportData = null;
+  document.getElementById('lineModal').style.display = 'block';
+  setTimeout(() => document.getElementById('lineTextarea').focus(), 50);
+}
+
+function onLineTextInput() {
+  clearTimeout(_lineDebounce);
+  _lineDebounce = setTimeout(() => {
+    const text = document.getElementById('lineTextarea').value;
+    if (!text.trim()) {
+      document.getElementById('lineModalSummary').textContent = '';
+      document.getElementById('lineModalGroups').innerHTML = '';
+      document.getElementById('lineImportBtn').disabled = true;
+      _lineImportData = null;
+      return;
+    }
+    try {
+      _lineImportData = parseLineText(text);
+      showLineModal(_lineImportData);
+    } catch(err) {
+      toast('解析失敗：' + err.message);
+    }
+  }, 300);
+}
+
+function parseLineText(text) {
+  const lines = text.split('\n');
+  const timeRe = /^\d{1,2}:\d{2}\s/;
+  // Date markers like "2026.05.19 星期二" — mark when the calendar date changes
+  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})\s+星期/;
+
+  // First pass: find all date markers and their line positions
+  const dateMarkers = []; // [{ lineIndex, date: "YYYY-MM-DD" }]
+  for (let i = 0; i < lines.length; i++) {
+    const m = dateMarkerRe.exec(lines[i].trim());
+    if (m) dateMarkers.push({ lineIndex: i, date: `${m[1]}-${m[2]}-${m[3]}` });
+  }
+
+  // Messages before the first marker belong to the previous calendar day
+  let startDate;
+  if (dateMarkers.length > 0) {
+    const d = new Date(dateMarkers[0].date + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    startDate = fmtDate(d);
+  } else {
+    startDate = fmtDate(new Date());
+  }
+
+  // Second pass: collect messages tagged with the date they were sent
+  let currentDate = startDate;
+  let markerPtr = 0;
+  const msgs = []; // [{ date, content }]
+  let cur = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    // Advance through any date markers at this line
+    if (markerPtr < dateMarkers.length && dateMarkers[markerPtr].lineIndex === i) {
+      if (cur !== null) { msgs.push({ date: currentDate, content: cur }); cur = null; }
+      currentDate = dateMarkers[markerPtr].date;
+      markerPtr++;
+      continue;
+    }
+    const trimmed = lines[i].trimEnd();
+    if (timeRe.test(trimmed)) {
+      if (cur !== null) msgs.push({ date: currentDate, content: cur });
+      cur = trimmed.replace(/^\d{1,2}:\d{2}\s+/, '');
+    } else if (cur !== null) {
+      cur += '\n' + trimmed;
+    }
+  }
+  if (cur !== null) msgs.push({ date: currentDate, content: cur });
+
+  // Group by 下單日 (the date the LINE message was sent)
+  const byDate = {}; // { "YYYY-MM-DD": { orders: [{store,qty}], noOrders: [] } }
+
+  for (const { date, content } of msgs) {
+    if (!content.trim()) continue;
+    if (content.includes('已收回訊息')) continue;
+    if (content.includes('加入聊天')) continue;
+
+    if (!byDate[date]) byDate[date] = { orders: [], noOrders: [] };
+
+    const storeM = content.match(/店　名[：:]\s*(.+)/);
+    const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
+
+    if (storeM && qtyM) {
+      const store = storeM[1].trim();
+      const qty   = parseInt(qtyM[1], 10);
+      // Parse explicit delivery date if present; fallback to message date
+      const dateM = content.match(/(?:到貨|訂貨)日[：:]\s*(\d+)\/(\d+)/);
+      let deliveryDate = date;
+      if (dateM) {
+        const year = new Date().getFullYear();
+        deliveryDate = `${year}-${dateM[1].padStart(2,'0')}-${dateM[2].padStart(2,'0')}`;
+      }
+      byDate[date].orders.push({ store, qty, deliveryDate });
+    } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
+      byDate[date].noOrders.push(content.trim());
+    }
+  }
+
+  return byDate; // { "YYYY-MM-DD": { orders, noOrders } }
+}
+
+const _DOW = ['日','一','二','三','四','五','六'];
+function _dateLabelCN(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}（${_DOW[d.getDay()]}）`;
+}
+
+function showLineModal(byDate) {
+  const dates = Object.keys(byDate).sort();
+  const totalOrders   = dates.reduce((s, d) => s + byDate[d].orders.length,   0);
+  const totalNoOrders = dates.reduce((s, d) => s + byDate[d].noOrders.length, 0);
+
+  document.getElementById('lineModalSummary').textContent =
+    `共找到 ${dates.length} 個下單日、${totalOrders} 筆訂單、${totalNoOrders} 筆無需叫貨`;
+
+  const groupsHtml = dates.length ? dates.map(dateStr => {
+    const { orders, noOrders } = byDate[dateStr];
+    // Group by delivery date for sub-summary
+    const byDel = {};
+    orders.forEach(o => { byDel[o.deliveryDate] = (byDel[o.deliveryDate] || 0) + 1; });
+    const delKeys = Object.keys(byDel).sort();
+    const delSummary = delKeys.map(d =>
+      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byDel[d]}筆</span>`
+    ).join('');
+
+    return `<div class="line-group-row">
+      <label class="line-group-label">
+        <input type="checkbox" checked value="${dateStr}">
+        <span style="width:100%">
+          <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
+          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
+          <br><span style="font-size:0.78rem;line-height:1.8">${delSummary}</span>
+        </span>
+      </label>
+    </div>`;
+  }).join('') : '<div style="color:#bbb;text-align:center;padding:20px">未找到任何訂單</div>';
+
+  document.getElementById('lineModalGroups').innerHTML = groupsHtml;
+  document.getElementById('lineImportBtn').disabled = !dates.length;
+}
+
+function closeLineModal() {
+  document.getElementById('lineModal').style.display = 'none';
+  document.getElementById('lineTextarea').value = '';
+  _lineImportData = null;
+}
+
+async function confirmLineImport() {
+  const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
+  if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
+
+  // Collect all orders keyed by their actual delivery date
+  const byDelivery = {}; // { "YYYY-MM-DD": { storeName: qty } }
+  for (const cb of checks) {
+    const { orders } = _lineImportData[cb.value] || {};
+    if (!orders) continue;
+    orders.forEach(o => {
+      if (!byDelivery[o.deliveryDate]) byDelivery[o.deliveryDate] = {};
+      byDelivery[o.deliveryDate][o.store] = (byDelivery[o.deliveryDate][o.store] || 0) + o.qty;
+    });
+  }
+
+  const deliveryDates = Object.keys(byDelivery).sort();
+  for (const dateStr of deliveryDates) {
+    const stores = byDelivery[dateStr];
+    await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
+      { stores, date: dateStr, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+  }
+
+  closeLineModal();
+  toast(`✓ 已存入 ${deliveryDates.length} 個出貨日`);
+  setDate(deliveryDates[0]);
 }
 
 // ── 未叫單 ────────────────────────────────────────────
@@ -512,6 +743,7 @@ function renderMissingList() {
   const missing = STORES.filter(s => !ordered.has(s.n));
 
   countEl.textContent = missing.length ? `（${missing.length} 家）` : '';
+
   if (!_missingOpen) return;
 
   if (!missing.length) {
@@ -557,187 +789,6 @@ async function loadEarlyOrders() {
   await Promise.all(reads);
   _earlyOrdersReady = true;
   renderMissingList();
-}
-
-// ── LINE 匯入 ──────────────────────────────────────────
-let _lineImportData = null;
-let _lineDebounce  = null;
-
-function openLineModal() {
-  document.getElementById('lineTextarea').value = '';
-  document.getElementById('lineModalSummary').textContent = '';
-  document.getElementById('lineModalGroups').innerHTML = '';
-  document.getElementById('lineImportBtn').disabled = true;
-  _lineImportData = null;
-  document.getElementById('lineModal').style.display = 'block';
-  setTimeout(() => document.getElementById('lineTextarea').focus(), 50);
-}
-
-function onLineTextInput() {
-  clearTimeout(_lineDebounce);
-  _lineDebounce = setTimeout(() => {
-    const text = document.getElementById('lineTextarea').value;
-    if (!text.trim()) {
-      document.getElementById('lineModalSummary').textContent = '';
-      document.getElementById('lineModalGroups').innerHTML = '';
-      document.getElementById('lineImportBtn').disabled = true;
-      _lineImportData = null;
-      return;
-    }
-    try {
-      _lineImportData = parseLineText(text);
-      showLineModal(_lineImportData);
-    } catch(err) {
-      toast('解析失敗：' + err.message);
-    }
-  }, 300);
-}
-
-function parseLineText(text) {
-  const lines = text.split('\n');
-  const timeRe = /^\d{1,2}:\d{2}\s/;
-  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})\s+星期/;
-
-  const dateMarkers = [];
-  for (let i = 0; i < lines.length; i++) {
-    const m = dateMarkerRe.exec(lines[i].trim());
-    if (m) dateMarkers.push({ lineIndex: i, date: `${m[1]}-${m[2]}-${m[3]}` });
-  }
-
-  let startDate;
-  if (dateMarkers.length > 0) {
-    const d = new Date(dateMarkers[0].date + 'T00:00:00');
-    d.setDate(d.getDate() - 1);
-    startDate = d.toISOString().slice(0, 10);
-  } else {
-    startDate = new Date().toISOString().slice(0, 10);
-  }
-
-  let currentDate = startDate;
-  let markerPtr = 0;
-  const msgs = [];
-  let cur = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (markerPtr < dateMarkers.length && dateMarkers[markerPtr].lineIndex === i) {
-      if (cur !== null) { msgs.push({ date: currentDate, content: cur }); cur = null; }
-      currentDate = dateMarkers[markerPtr].date;
-      markerPtr++;
-      continue;
-    }
-    const trimmed = lines[i].trimEnd();
-    if (timeRe.test(trimmed)) {
-      if (cur !== null) msgs.push({ date: currentDate, content: cur });
-      cur = trimmed.replace(/^\d{1,2}:\d{2}\s+/, '');
-    } else if (cur !== null) {
-      cur += '\n' + trimmed;
-    }
-  }
-  if (cur !== null) msgs.push({ date: currentDate, content: cur });
-
-  const byDate = {};
-  const year = new Date().getFullYear();
-
-  for (const { date, content } of msgs) {
-    if (!content.trim()) continue;
-    if (content.includes('已收回訊息')) continue;
-    if (content.includes('加入聊天')) continue;
-
-    if (!byDate[date]) byDate[date] = { orders: [], noOrders: [] };
-
-    const storeM = content.match(/店　名[：:]\s*(.+)/);
-    const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
-
-    if (storeM && qtyM) {
-      const store = storeM[1].trim();
-      const qty   = parseInt(qtyM[1], 10);
-      // Parse explicit delivery date; fallback to message date
-      const dateM = content.match(/(?:到貨|訂貨)日[：:]\s*(\d+)\/(\d+)/);
-      let deliveryDate = date;
-      if (dateM) {
-        deliveryDate = `${year}-${dateM[1].padStart(2,'0')}-${dateM[2].padStart(2,'0')}`;
-      }
-      byDate[date].orders.push({ store, qty, deliveryDate });
-    } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
-      byDate[date].noOrders.push(content.trim());
-    }
-  }
-
-  return byDate;
-}
-
-const _DOW = ['日','一','二','三','四','五','六'];
-function _dateLabelCN(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return `${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}（${_DOW[d.getDay()]}）`;
-}
-
-function showLineModal(byDate) {
-  const dates = Object.keys(byDate).sort();
-  const totalOrders   = dates.reduce((s, d) => s + byDate[d].orders.length,   0);
-  const totalNoOrders = dates.reduce((s, d) => s + byDate[d].noOrders.length, 0);
-
-  document.getElementById('lineModalSummary').textContent =
-    `共找到 ${dates.length} 個下單日、${totalOrders} 筆訂單、${totalNoOrders} 筆無需叫貨`;
-
-  const groupsHtml = dates.length ? dates.map(dateStr => {
-    const { orders, noOrders } = byDate[dateStr];
-    // Sub-summary by delivery date
-    const byDel = {};
-    orders.forEach(o => { byDel[o.deliveryDate] = (byDel[o.deliveryDate] || 0) + 1; });
-    const delSummary = Object.keys(byDel).sort().map(d =>
-      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byDel[d]}筆</span>`
-    ).join('');
-
-    return `<div class="line-group-row">
-      <label class="line-group-label">
-        <input type="checkbox" checked value="${dateStr}">
-        <span style="width:100%">
-          <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
-          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
-          <br><span style="font-size:0.78rem;line-height:1.8">${delSummary}</span>
-        </span>
-      </label>
-    </div>`;
-  }).join('') : '<div style="color:#bbb;text-align:center;padding:20px">未找到任何訂單</div>';
-
-  document.getElementById('lineModalGroups').innerHTML = groupsHtml;
-  document.getElementById('lineImportBtn').disabled = !dates.length;
-}
-
-function closeLineModal() {
-  document.getElementById('lineModal').style.display = 'none';
-  document.getElementById('lineTextarea').value = '';
-  _lineImportData = null;
-}
-
-async function confirmLineImport() {
-  const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
-  if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
-
-  // Collect orders keyed by actual delivery date
-  const byDelivery = {};
-  for (const cb of checks) {
-    const { orders } = _lineImportData[cb.value] || {};
-    if (!orders) continue;
-    orders.forEach(o => {
-      if (!byDelivery[o.deliveryDate]) byDelivery[o.deliveryDate] = {};
-      byDelivery[o.deliveryDate][o.store] = (byDelivery[o.deliveryDate][o.store] || 0) + o.qty;
-    });
-  }
-
-  const deliveryDates = Object.keys(byDelivery).sort();
-  for (const dateStr of deliveryDates) {
-    const stores = byDelivery[dateStr];
-    await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
-      { stores, date: dateStr, updatedAt: new Date().toISOString() },
-      { merge: true }
-    );
-  }
-
-  closeLineModal();
-  toast(`✓ 已存入 ${deliveryDates.length} 個出貨日`);
-  setDate(deliveryDates[0]);
 }
 
 // ── Toast ─────────────────────────────────────────────
