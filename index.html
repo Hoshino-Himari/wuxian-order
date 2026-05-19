@@ -350,6 +350,14 @@ function fmtDateCN(str) {
   return `${y}年${parseInt(m)}月${parseInt(d)}日 到貨`;
 }
 
+function getShipDateForMessageDate(messageDate) {
+  const d = new Date(messageDate + 'T00:00:00');
+  const dow = d.getDay();
+  // 一三五下單，二四六出貨；出貨日當天追加算同一天。
+  if ([1, 3, 5].includes(dow)) d.setDate(d.getDate() + 1);
+  return fmtDate(d);
+}
+
 function setDate(dateStr) {
   currentDate = dateStr;
   document.getElementById("headerDate").textContent = fmtDateCN(dateStr);
@@ -619,8 +627,8 @@ function parseLineText(text) {
   }
   if (cur !== null) msgs.push({ date: currentDate, content: cur });
 
-  // Group by 下單日 (the date the LINE message was sent)
-  const byDate = {}; // { "YYYY-MM-DD": { orders: [{store,qty}], noOrders: [] } }
+  // Group by the date the LINE message was sent. Do not trust dates inside the message body.
+  const byDate = {}; // { "YYYY-MM-DD": { orders: [{store,qty,shipDate}], noOrders: [] } }
 
   for (const { date, content } of msgs) {
     if (!content.trim()) continue;
@@ -635,14 +643,8 @@ function parseLineText(text) {
     if (storeM && qtyM) {
       const store = storeM[1].trim();
       const qty   = parseInt(qtyM[1], 10);
-      // Parse explicit delivery date if present; fallback to message date
-      const dateM = content.match(/(?:到貨|訂貨)日[：:]\s*(\d+)\/(\d+)/);
-      let deliveryDate = date;
-      if (dateM) {
-        const year = new Date().getFullYear();
-        deliveryDate = `${year}-${dateM[1].padStart(2,'0')}-${dateM[2].padStart(2,'0')}`;
-      }
-      byDate[date].orders.push({ store, qty, deliveryDate });
+      const shipDate = getShipDateForMessageDate(date);
+      byDate[date].orders.push({ store, qty, shipDate });
     } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
       byDate[date].noOrders.push(content.trim());
     }
@@ -667,12 +669,12 @@ function showLineModal(byDate) {
 
   const groupsHtml = dates.length ? dates.map(dateStr => {
     const { orders, noOrders } = byDate[dateStr];
-    // Group by delivery date for sub-summary
-    const byDel = {};
-    orders.forEach(o => { byDel[o.deliveryDate] = (byDel[o.deliveryDate] || 0) + 1; });
-    const delKeys = Object.keys(byDel).sort();
-    const delSummary = delKeys.map(d =>
-      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byDel[d]}筆</span>`
+    // Group by computed ship date from the LINE message date.
+    const byShip = {};
+    orders.forEach(o => { byShip[o.shipDate] = (byShip[o.shipDate] || 0) + 1; });
+    const shipKeys = Object.keys(byShip).sort();
+    const shipSummary = shipKeys.map(d =>
+      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byShip[d]}筆</span>`
     ).join('');
 
     return `<div class="line-group-row">
@@ -681,7 +683,7 @@ function showLineModal(byDate) {
         <span style="width:100%">
           <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
           <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
-          <br><span style="font-size:0.78rem;line-height:1.8">${delSummary}</span>
+          <br><span style="font-size:0.78rem;line-height:1.8">${shipSummary}</span>
         </span>
       </label>
     </div>`;
@@ -701,20 +703,20 @@ async function confirmLineImport() {
   const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
   if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
 
-  // Collect all orders keyed by their actual delivery date
-  const byDelivery = {}; // { "YYYY-MM-DD": { storeName: qty } }
+  // Collect all orders keyed by ship date computed from the LINE message date.
+  const byShipDate = {}; // { "YYYY-MM-DD": { storeName: qty } }
   for (const cb of checks) {
     const { orders } = _lineImportData[cb.value] || {};
     if (!orders) continue;
     orders.forEach(o => {
-      if (!byDelivery[o.deliveryDate]) byDelivery[o.deliveryDate] = {};
-      byDelivery[o.deliveryDate][o.store] = (byDelivery[o.deliveryDate][o.store] || 0) + o.qty;
+      if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = {};
+      byShipDate[o.shipDate][o.store] = (byShipDate[o.shipDate][o.store] || 0) + o.qty;
     });
   }
 
-  const deliveryDates = Object.keys(byDelivery).sort();
-  for (const dateStr of deliveryDates) {
-    const stores = byDelivery[dateStr];
+  const shipDates = Object.keys(byShipDate).sort();
+  for (const dateStr of shipDates) {
+    const stores = byShipDate[dateStr];
     await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
       { stores, date: dateStr, updatedAt: new Date().toISOString() },
       { merge: true }
@@ -722,8 +724,8 @@ async function confirmLineImport() {
   }
 
   closeLineModal();
-  toast(`✓ 已存入 ${deliveryDates.length} 個出貨日`);
-  setDate(deliveryDates[0]);
+  toast(`✓ 已存入 ${shipDates.length} 個出貨日`);
+  setDate(shipDates[0]);
 }
 
 // ── 未叫單 ────────────────────────────────────────────
