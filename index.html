@@ -46,7 +46,6 @@
     .btn-submit:active { background: #155230; }
     .btn-submit:disabled { background: #aaa; cursor: not-allowed; }
 
-    /* 送出成功畫面 */
     .success-card { text-align: center; padding: 30px 20px; }
     .success-icon { font-size: 3rem; margin-bottom: 10px; }
     .success-title { font-size: 1.3rem; font-weight: 700; color: #1e6b3e; margin-bottom: 6px; }
@@ -54,7 +53,6 @@
     .btn-edit { padding: 10px 24px; border: 1.5px solid #1e6b3e; color: #1e6b3e;
                 background: white; border-radius: 8px; font-size: 0.95rem; cursor: pointer; font-weight: 600; }
 
-    /* 今日訂單列表 */
     .order-list { margin-top: 6px; }
     .order-item { display: flex; justify-content: space-between; align-items: center;
                   padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
@@ -65,7 +63,6 @@
     .order-total { display: flex; justify-content: space-between; padding: 10px 0 0;
                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
 
-    /* 管理員區塊 */
     .admin-toggle { text-align: center; margin-bottom: 12px; }
     .btn-link { background: none; border: none; color: #999; font-size: 0.82rem;
                 cursor: pointer; text-decoration: underline; }
@@ -92,13 +89,12 @@
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
 
-    /* LINE 匯入 Modal */
     .line-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; overflow-y:auto; padding:20px; }
     .line-modal-body { max-width:480px; margin:20px auto; }
     .line-group-row { padding:10px 0; border-bottom:1px solid #f0f0f0; }
     .line-group-row:last-child { border-bottom:none; }
-    .line-group-label { display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
-    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; }
+    .line-group-label { display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-weight:normal; margin-bottom:0; }
+    .line-group-label input[type=checkbox] { width:18px; height:18px; accent-color:#1e6b3e; flex-shrink:0; margin-top:2px; }
     .btn-green { background:#1e6b3e; color:white; }
   </style>
 </head>
@@ -111,7 +107,6 @@
 
 <div class="main">
 
-  <!-- 填單區 -->
   <div class="card" id="formCard">
     <div>
       <label for="storeInput">門市名稱</label>
@@ -133,7 +128,6 @@
     <button class="btn-submit" id="submitBtn" onclick="submitOrder()">送出下單</button>
   </div>
 
-  <!-- 送出成功 -->
   <div class="card success-card" id="successCard" style="display:none">
     <div class="success-icon">✅</div>
     <div class="success-title" id="successTitle">下單成功</div>
@@ -148,6 +142,18 @@
     </div>
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
+    </div>
+  </div>
+
+  <!-- 未叫單 -->
+  <div class="card">
+    <div class="section-title" style="cursor:pointer;user-select:none;margin-bottom:0" onclick="toggleMissing()">
+      未叫單門市
+      <span id="missingCount" style="font-weight:400;color:#aaa;font-size:0.88rem"></span>
+      <span id="missingToggleIcon" style="float:right">▾</span>
+    </div>
+    <div class="order-list" id="missingList" style="display:none">
+      <div class="no-orders">載入中…</div>
     </div>
   </div>
 
@@ -190,7 +196,6 @@
 <div id="toast"></div>
 
 <script>
-// ── 門市資料 ──────────────────────────────────────────
 const STORES = [
   { r:"新竹", n:"新豐店" },
   { r:"新竹", n:"環北店" },
@@ -261,11 +266,10 @@ const STORES = [
   { r:"屏東", n:"里港店" },
 
   { r:"燒甲", n:"燒甲佳里店" },
-  { r:"燒甲", n:"燒甲陽明店" },
-  { r:"燒甲", n:"燒甲嘉義民北店" },
+  { r:"燒甲", n:"燒甲陽明店",      dayOff:"週二、三" },
+  { r:"燒甲", n:"燒甲嘉義民北店",  dayOff:"週二、三" },
 ];
 
-// ── Firebase ──────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyBB9jPOLfJTBcW6bu1UL-KcF5SIaHhricA",
   authDomain: "hanbaoclam-2c65e.firebaseapp.com",
@@ -277,12 +281,12 @@ const firebaseConfig = {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// ── 狀態 ─────────────────────────────────────────────
 let currentDate = "";
 let todayOrders = {};
 let unsubscribe = null;
+let _earlyOrders = {};
+let _earlyOrdersReady = false;
 
-// ── 初始化 ─────────────────────────────────────────────
 window.onload = () => {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -328,10 +332,12 @@ function setDate(dateStr) {
   currentDate = dateStr;
   document.getElementById("headerDate").textContent = fmtDateCN(dateStr);
   document.getElementById("adminDate").value = dateStr;
+  _earlyOrders = {};
+  _earlyOrdersReady = false;
   listenOrders();
+  loadEarlyOrders();
 }
 
-// ── 即時監聽訂單 ──────────────────────────────────────
 function listenOrders() {
   if (unsubscribe) unsubscribe();
   if (!currentDate) return;
@@ -350,7 +356,6 @@ function storeSelectChanged() {
   if (v) document.getElementById("storeInput").value = v;
 }
 
-// ── 送出下單 ──────────────────────────────────────────
 async function submitOrder() {
   const store = document.getElementById("storeInput").value.trim()
              || document.getElementById("storeSelect").value;
@@ -403,7 +408,6 @@ function calcBox(qty) {
   return { type: "C", count: Math.ceil(qty / 7) };
 }
 
-// ── 渲染訂單列表 ──────────────────────────────────────
 function renderOrderList() {
   const box = document.getElementById("orderList");
   const knownNames = new Set(STORES.map(s => s.n));
@@ -418,6 +422,7 @@ function renderOrderList() {
 
   if (!entries.length) {
     box.innerHTML = '<div class="no-orders">尚無訂單</div>';
+    renderMissingList();
     return;
   }
 
@@ -431,12 +436,11 @@ function renderOrderList() {
     <span>共 ${entries.length} 家</span>
     <span>${totalPkg} 包</span>
   </div>`;
+  renderMissingList();
 }
 
-// ── 管理員 ────────────────────────────────────────────
 function toggleAdmin() {
-  const panel = document.getElementById("adminPanel");
-  panel.classList.toggle("open");
+  document.getElementById("adminPanel").classList.toggle("open");
 }
 
 function changeDate() {
@@ -454,10 +458,8 @@ function clearDate() {
     .catch(e => toast("失敗：" + e.message));
 }
 
-// ── 匯出 Excel ────────────────────────────────────────
 function exportExcel() {
   const wb = XLSX.utils.book_new();
-
   const header = ["區域", "門市", "下單量(包)", "總斤數", "箱型", "箱數"];
   const rows = [header];
   const regions = [...new Set(STORES.map(s => s.r))];
@@ -480,23 +482,81 @@ function exportExcel() {
     }
   });
   rows.push(["", "合計", totalPkg, totalPkg*5, "", ""]);
-
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{wch:6},{wch:14},{wch:12},{wch:10},{wch:6},{wch:6}];
   XLSX.utils.book_append_sheet(wb, ws, currentDate.replace(/-/g,""));
-
   const notOrdered = STORES.filter(s => !todayOrders[s.n]);
   if (notOrdered.length) {
-    const ws2 = XLSX.utils.aoa_to_sheet([
-      ["區域","門市"],
-      ...notOrdered.map(s => [s.r, s.n])
-    ]);
+    const ws2 = XLSX.utils.aoa_to_sheet([["區域","門市"],...notOrdered.map(s => [s.r, s.n])]);
     ws2["!cols"] = [{wch:6},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws2, "未下單");
   }
-
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── 未叫單 ────────────────────────────────────────────
+let _missingOpen = false;
+
+function toggleMissing() {
+  _missingOpen = !_missingOpen;
+  document.getElementById('missingList').style.display = _missingOpen ? 'block' : 'none';
+  document.getElementById('missingToggleIcon').textContent = _missingOpen ? '▴' : '▾';
+  if (_missingOpen) renderMissingList();
+}
+
+function renderMissingList() {
+  const countEl = document.getElementById('missingCount');
+  const listEl  = document.getElementById('missingList');
+  const ordered = new Set(Object.keys(todayOrders).filter(k => todayOrders[k] > 0));
+  const missing = STORES.filter(s => !ordered.has(s.n));
+
+  countEl.textContent = missing.length ? `（${missing.length} 家）` : '';
+  if (!_missingOpen) return;
+
+  if (!missing.length) {
+    listEl.innerHTML = '<div class="no-orders">所有門市今日已叫貨 ✓</div>';
+    return;
+  }
+
+  listEl.innerHTML = missing.map(s => {
+    let badge = '';
+    if (_earlyOrdersReady && _earlyOrders[s.n]) {
+      const dd = _earlyOrders[s.n];
+      const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
+      badge = `<span style="color:#2e7d32;font-size:0.78rem;margin-left:4px">✓ 已提前叫貨（出貨 ${label}）</span>`;
+    } else if (s.dayOff) {
+      badge = `<span class="dayoff-tag">${s.dayOff} 公休</span>`;
+    }
+    const isEarly = _earlyOrdersReady && _earlyOrders[s.n];
+    return `<div class="order-item">
+      <span class="order-name">${s.n}${badge}</span>
+      <span style="color:${isEarly ? '#2e7d32' : '#ddd'};font-size:0.82rem">${isEarly ? '✓' : '未叫'}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadEarlyOrders() {
+  _earlyOrders = {};
+  _earlyOrdersReady = false;
+  const base = new Date(currentDate + 'T00:00:00');
+  const reads = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(base);
+    d.setDate(d.getDate() + i);
+    const dateStr = fmtDate(d);
+    reads.push(
+      db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).get().then(snap => {
+        if (snap.exists && snap.data().stores)
+          Object.keys(snap.data().stores).forEach(name => {
+            if (!_earlyOrders[name]) _earlyOrders[name] = dateStr;
+          });
+      })
+    );
+  }
+  await Promise.all(reads);
+  _earlyOrdersReady = true;
+  renderMissingList();
 }
 
 // ── LINE 匯入 ──────────────────────────────────────────
@@ -576,6 +636,7 @@ function parseLineText(text) {
   if (cur !== null) msgs.push({ date: currentDate, content: cur });
 
   const byDate = {};
+  const year = new Date().getFullYear();
 
   for (const { date, content } of msgs) {
     if (!content.trim()) continue;
@@ -588,7 +649,15 @@ function parseLineText(text) {
     const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
 
     if (storeM && qtyM) {
-      byDate[date].orders.push({ store: storeM[1].trim(), qty: parseInt(qtyM[1], 10) });
+      const store = storeM[1].trim();
+      const qty   = parseInt(qtyM[1], 10);
+      // Parse explicit delivery date; fallback to message date
+      const dateM = content.match(/(?:到貨|訂貨)日[：:]\s*(\d+)\/(\d+)/);
+      let deliveryDate = date;
+      if (dateM) {
+        deliveryDate = `${year}-${dateM[1].padStart(2,'0')}-${dateM[2].padStart(2,'0')}`;
+      }
+      byDate[date].orders.push({ store, qty, deliveryDate });
     } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
       byDate[date].noOrders.push(content.trim());
     }
@@ -613,12 +682,20 @@ function showLineModal(byDate) {
 
   const groupsHtml = dates.length ? dates.map(dateStr => {
     const { orders, noOrders } = byDate[dateStr];
+    // Sub-summary by delivery date
+    const byDel = {};
+    orders.forEach(o => { byDel[o.deliveryDate] = (byDel[o.deliveryDate] || 0) + 1; });
+    const delSummary = Object.keys(byDel).sort().map(d =>
+      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byDel[d]}筆</span>`
+    ).join('');
+
     return `<div class="line-group-row">
       <label class="line-group-label">
         <input type="checkbox" checked value="${dateStr}">
-        <span>
+        <span style="width:100%">
           <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
-          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆訂單、${noOrders.length} 筆無需</span>
+          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
+          <br><span style="font-size:0.78rem;line-height:1.8">${delSummary}</span>
         </span>
       </label>
     </div>`;
@@ -638,26 +715,29 @@ async function confirmLineImport() {
   const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
   if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
 
-  let imported = 0;
+  // Collect orders keyed by actual delivery date
+  const byDelivery = {};
   for (const cb of checks) {
-    const dateStr = cb.value;
-    const { orders } = _lineImportData[dateStr] || {};
-    if (!orders || !orders.length) continue;
+    const { orders } = _lineImportData[cb.value] || {};
+    if (!orders) continue;
+    orders.forEach(o => {
+      if (!byDelivery[o.deliveryDate]) byDelivery[o.deliveryDate] = {};
+      byDelivery[o.deliveryDate][o.store] = (byDelivery[o.deliveryDate][o.store] || 0) + o.qty;
+    });
+  }
 
-    const stores = {};
-    orders.forEach(o => { stores[o.store] = (stores[o.store] || 0) + o.qty; });
-
-    const docId = `五鮮級_${dateStr}`;
-    await db.collection('orders_wuxian').doc(docId).set(
+  const deliveryDates = Object.keys(byDelivery).sort();
+  for (const dateStr of deliveryDates) {
+    const stores = byDelivery[dateStr];
+    await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
       { stores, date: dateStr, updatedAt: new Date().toISOString() },
       { merge: true }
     );
-    imported++;
   }
 
   closeLineModal();
-  toast(`✓ 已匯入 ${imported} 個下單日`);
-  setDate([...checks][0].value);
+  toast(`✓ 已存入 ${deliveryDates.length} 個出貨日`);
+  setDate(deliveryDates[0]);
 }
 
 // ── Toast ─────────────────────────────────────────────
