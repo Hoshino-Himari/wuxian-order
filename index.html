@@ -337,7 +337,13 @@ window.onload = () => {
   });
 };
 
-function fmtDate(d) { return d.toISOString().slice(0,10); }
+function fmtDate(d) {
+  // Use local date components to avoid UTC timezone offset issues
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
 function fmtDateCN(str) {
   if (!str) return "";
   const [y,m,d] = str.split("-");
@@ -584,9 +590,9 @@ function parseLineText(text) {
   if (dateMarkers.length > 0) {
     const d = new Date(dateMarkers[0].date + 'T00:00:00');
     d.setDate(d.getDate() - 1);
-    startDate = d.toISOString().slice(0, 10);
+    startDate = fmtDate(d);
   } else {
-    startDate = new Date().toISOString().slice(0, 10);
+    startDate = fmtDate(new Date());
   }
 
   // Second pass: collect messages tagged with the date they were sent
