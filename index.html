@@ -72,6 +72,7 @@
     .missing-chip .tag { color: #1976d2; background: #e3f2fd; border-radius: 4px; padding: 1px 4px; font-size: 0.76rem; }
     .missing-chip .tag.early { color: #1e6b3e; background: #e8f5e9; }
     .missing-chip .tag.dayoff { color: #e65100; background: #fff3e0; }
+    .missing-chip .tag.missing { color: #999; background: #eee; }
 
     /* 管理員區塊 */
     .admin-toggle { text-align: center; margin-bottom: 12px; }
@@ -311,6 +312,7 @@ const db = firebase.firestore();
 // ── 狀態 ─────────────────────────────────────────────
 let currentDate = "";       // YYYY-MM-DD，to 到貨日
 let todayOrders = {};       // { storeName: qty }
+let todayNoOrders = {};     // { storeName: true }
 let unsubscribe = null;
 let _earlyOrders = {};      // { storeName: "YYYY-MM-DD" } 往後 7 天已叫
 let _earlyOrdersReady = false;
@@ -379,6 +381,17 @@ function getNextShipDateFromMessageDate(messageDate) {
   return fmtDate(d);
 }
 
+function getNextShipDateAfter(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  for (let i = 0; i <= 7; i++) {
+    const candidate = new Date(d);
+    candidate.setDate(candidate.getDate() + i);
+    if (SHIP_DAYS.includes(candidate.getDay())) return fmtDate(candidate);
+  }
+  return dateStr;
+}
+
 function getShipDateBeforeArrival(arrivalDate) {
   const d = new Date(arrivalDate + 'T00:00:00');
   for (let i = 1; i <= 7; i++) {
@@ -402,27 +415,26 @@ function parseArrivalWeekdayFromMessage(content, messageDate) {
   return "";
 }
 
-function parseArrivalDateFromMessage(content, messageDate) {
-  const year = parseInt(messageDate.slice(0, 4), 10);
+function parseArrivalDateFromMessage(content, baseDate) {
+  const year = parseInt(baseDate.slice(0, 4), 10);
   const numeric = content.match(/(?:到貨|訂貨|交貨)日?[：:\s]*(\d{1,2})[\/.-](\d{1,2})/);
   if (numeric) {
     return `${year}-${numeric[1].padStart(2, '0')}-${numeric[2].padStart(2, '0')}`;
   }
 
-  return parseArrivalWeekdayFromMessage(content, messageDate);
+  return parseArrivalWeekdayFromMessage(content, baseDate);
 }
 
-function getLineOrderShipDate(content, messageDate, fallbackContent = "") {
-  const arrivalDate = parseArrivalDateFromMessage(content, messageDate)
-    || (fallbackContent ? parseArrivalWeekdayFromMessage(fallbackContent, messageDate) : "");
-  if (arrivalDate) return getShipDateBeforeArrival(arrivalDate);
-  return getNextShipDateFromMessageDate(messageDate);
+function getLineOrderShipDate(content, defaultShipDate, fallbackContent = "") {
+  const text = `${content}\n${fallbackContent}`;
+  return /提早|提前|店休|公休/.test(text) ? getNextShipDateAfter(defaultShipDate) : defaultShipDate;
 }
 
 function normalizeStoreName(raw) {
   let name = (raw || '').trim();
   name = name.replace(/^[@＠][^\s]+[\s-]*/, '').trim();
   name = name.replace(/^(五鮮級|五鮮級-|燒甲五春|燒甲五春-|燒甲-)/, '').trim();
+  name = name.split(/\s+/)[0];
   name = name.replace(/[，,。．.：:；;、\s]+$/g, '').trim();
   if (STORE_ALIASES[name]) return STORE_ALIASES[name];
   if (STORE_BY_NAME[name]) return name;
@@ -439,12 +451,42 @@ function normalizeOrderStores(stores) {
   return normalized;
 }
 
+function normalizeNoOrderStores(noOrders) {
+  const normalized = {};
+  if (Array.isArray(noOrders)) {
+    noOrders.forEach(name => { normalized[normalizeStoreName(name)] = true; });
+  } else {
+    Object.keys(noOrders || {}).forEach(name => { normalized[normalizeStoreName(name)] = true; });
+  }
+  return normalized;
+}
+
 function extractLineOrderBlocks(content) {
-  const matches = [...content.matchAll(/^店[\s　]*名[：:]\s*(.+)$/gm)];
+  const matches = [...content.matchAll(/店[\s　]*名[：:]\s*([^\n\r]+)/g)];
   return matches.map((match, idx) => {
     const next = matches[idx + 1];
     return content.slice(match.index, next ? next.index : content.length).trim();
   });
+}
+
+function extractStoresFromText(content) {
+  const found = new Set();
+  for (const match of content.matchAll(/店[\s　]*名[：:]\s*([^\n\r]+)/g)) {
+    found.add(normalizeStoreName(match[1]));
+  }
+  STORES.forEach(s => {
+    if (content.includes(s.n)) found.add(s.n);
+  });
+  Object.entries(STORE_ALIASES).forEach(([alias, store]) => {
+    if (content.includes(alias)) found.add(store);
+  });
+  return [...found];
+}
+
+function escHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
 }
 
 function setDate(dateStr) {
@@ -453,6 +495,7 @@ function setDate(dateStr) {
   document.getElementById("adminDate").value = dateStr;
   _earlyOrders = {};
   _earlyOrdersReady = false;
+  todayNoOrders = {};
   listenOrders();
   loadEarlyOrders();
 }
@@ -463,7 +506,9 @@ function listenOrders() {
   if (!currentDate) return;
   const docId = `五鮮級_${currentDate}`;
   unsubscribe = db.collection("orders_wuxian").doc(docId).onSnapshot(snap => {
-    todayOrders = (snap.exists && snap.data().stores) ? normalizeOrderStores(snap.data().stores) : {};
+    const data = snap.exists ? snap.data() : {};
+    todayOrders = data.stores ? normalizeOrderStores(data.stores) : {};
+    todayNoOrders = data.noOrders ? normalizeNoOrderStores(data.noOrders) : {};
     renderOrderList();
   });
 }
@@ -672,77 +717,59 @@ function onLineTextInput() {
 function parseLineText(text) {
   const lines = text.split('\n');
   const timeRe = /^\d{1,2}:\d{2}\s/;
-  // Date markers like "2026.05.19 星期二" or just "2026.05.19".
-  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})(?:\s|$)/;
-
-  // First pass: find all date markers and their line positions
-  const dateMarkers = []; // [{ lineIndex, date: "YYYY-MM-DD" }]
-  for (let i = 0; i < lines.length; i++) {
-    const m = dateMarkerRe.exec(lines[i].trim());
-    if (m) dateMarkers.push({ lineIndex: i, date: `${m[1]}-${m[2]}-${m[3]}` });
-  }
-
-  // Messages before the first marker belong to the previous calendar day
-  let startDate;
-  if (dateMarkers.length > 0) {
-    const d = new Date(dateMarkers[0].date + 'T00:00:00');
-    d.setDate(d.getDate() - 1);
-    startDate = fmtDate(d);
-  } else {
-    startDate = fmtDate(new Date());
-  }
-
-  // Second pass: collect messages tagged with the date they were sent
-  let currentDate = startDate;
-  let markerPtr = 0;
-  const msgs = []; // [{ date, content }]
+  const dateMarkerRe = /^\d{4}\.\d{2}\.\d{2}(?:\s|$)/;
+  const defaultShipDate = currentDate || fmtDate(new Date());
+  const msgs = [];
   let cur = null;
 
-  for (let i = 0; i < lines.length; i++) {
-    // Advance through any date markers at this line
-    if (markerPtr < dateMarkers.length && dateMarkers[markerPtr].lineIndex === i) {
-      if (cur !== null) { msgs.push({ date: currentDate, content: cur }); cur = null; }
-      currentDate = dateMarkers[markerPtr].date;
-      markerPtr++;
-      continue;
-    }
-    const trimmed = lines[i].trimEnd();
+  for (const raw of lines) {
+    const trimmed = raw.trimEnd();
+    if (!trimmed.trim() || dateMarkerRe.test(trimmed.trim())) continue;
     if (timeRe.test(trimmed)) {
-      if (cur !== null) msgs.push({ date: currentDate, content: cur });
+      if (cur !== null) msgs.push(cur);
       cur = trimmed.replace(/^\d{1,2}:\d{2}\s+/, '');
     } else if (cur !== null) {
       cur += '\n' + trimmed;
+    } else {
+      cur = trimmed;
     }
   }
-  if (cur !== null) msgs.push({ date: currentDate, content: cur });
+  if (cur !== null) msgs.push(cur);
 
-  // Group by the LINE message date; if the body says an arrival day, convert it back to a Tue/Thu/Sat ship date.
-  const byDate = {}; // { "YYYY-MM-DD": { orders: [{store,qty,shipDate}], noOrders: [] } }
+  const byShipDate = {}; // { "YYYY-MM-DD": { orders: [{store,qty,shipDate,isEarly}], noOrders: [storeName] } }
 
-  for (const { date, content } of msgs) {
+  for (const content of msgs) {
     if (!content.trim()) continue;
     if (content.includes('已收回訊息')) continue;
     if (content.includes('加入聊天')) continue;
 
-    if (!byDate[date]) byDate[date] = { orders: [], noOrders: [] };
-
     const orderBlocks = extractLineOrderBlocks(content);
     if (orderBlocks.length) {
       orderBlocks.forEach(block => {
-        const storeM = block.match(/^店[\s　]*名[：:]\s*(.+)$/m);
+        const storeM = block.match(/店[\s　]*名[：:]\s*([^\n\r]+)/);
         const qtyM   = block.match(/\(包\)\s*[：:]\s*(\d+)/);
-        if (!storeM || !qtyM) return;
+        if (!storeM) return;
         const store = normalizeStoreName(storeM[1]);
+        if (/無需叫貨|不叫貨|無需訂貨|今日無需|不用叫|不用訂/.test(block) && !qtyM) {
+          if (!byShipDate[defaultShipDate]) byShipDate[defaultShipDate] = { orders: [], noOrders: [] };
+          if (!byShipDate[defaultShipDate].noOrders.includes(store)) byShipDate[defaultShipDate].noOrders.push(store);
+          return;
+        }
+        if (!qtyM) return;
         const qty   = parseInt(qtyM[1], 10);
-        const shipDate = getLineOrderShipDate(block, date, content);
-        byDate[date].orders.push({ store, qty, shipDate });
+        const shipDate = getLineOrderShipDate(block, defaultShipDate, content);
+        if (!byShipDate[shipDate]) byShipDate[shipDate] = { orders: [], noOrders: [] };
+        byShipDate[shipDate].orders.push({ store, qty, shipDate, isEarly: shipDate !== defaultShipDate });
       });
     } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
-      byDate[date].noOrders.push(content.trim());
+      if (!byShipDate[defaultShipDate]) byShipDate[defaultShipDate] = { orders: [], noOrders: [] };
+      extractStoresFromText(content).forEach(store => {
+        if (!byShipDate[defaultShipDate].noOrders.includes(store)) byShipDate[defaultShipDate].noOrders.push(store);
+      });
     }
   }
 
-  return byDate; // { "YYYY-MM-DD": { orders, noOrders } }
+  return byShipDate;
 }
 
 const _DOW = ['日','一','二','三','四','五','六'];
@@ -751,31 +778,34 @@ function _dateLabelCN(dateStr) {
   return `${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}（${_DOW[d.getDay()]}）`;
 }
 
-function showLineModal(byDate) {
-  const dates = Object.keys(byDate).sort();
-  const totalOrders   = dates.reduce((s, d) => s + byDate[d].orders.length,   0);
-  const totalNoOrders = dates.reduce((s, d) => s + byDate[d].noOrders.length, 0);
+function showLineModal(byShipDate) {
+  const dates = Object.keys(byShipDate).sort();
+  const totalOrders   = dates.reduce((s, d) => s + byShipDate[d].orders.length,   0);
+  const totalNoOrders = dates.reduce((s, d) => s + byShipDate[d].noOrders.length, 0);
+  const movedOrders   = dates.reduce((s, d) => s + byShipDate[d].orders.filter(o => o.isEarly).length, 0);
 
   document.getElementById('lineModalSummary').textContent =
-    `共找到 ${dates.length} 個下單日、${totalOrders} 筆訂單、${totalNoOrders} 筆無需叫貨`;
+    `共 ${totalOrders} 筆訂單、${totalNoOrders} 筆無需叫貨${movedOrders ? `、${movedOrders} 筆移到其他出貨日` : ''}`;
 
   const groupsHtml = dates.length ? dates.map(dateStr => {
-    const { orders, noOrders } = byDate[dateStr];
-    // Group by computed ship date from the LINE message date.
-    const byShip = {};
-    orders.forEach(o => { byShip[o.shipDate] = (byShip[o.shipDate] || 0) + 1; });
-    const shipKeys = Object.keys(byShip).sort();
-    const shipSummary = shipKeys.map(d =>
-      `<span style="background:#e8f5e9;border-radius:4px;padding:1px 6px;margin-right:4px">出貨 ${parseInt(d.slice(5,7))}/${parseInt(d.slice(8,10))} ${byShip[d]}筆</span>`
+    const { orders, noOrders } = byShipDate[dateStr];
+    const early = orders.filter(o => o.isEarly).length;
+    const totalQty = orders.reduce((s, o) => s + o.qty, 0);
+    const orderDetail = orders.slice(0, 4).map(o =>
+      `<span style="background:${o.isEarly ? '#fff3e0' : '#e8f5e9'};border-radius:4px;padding:1px 6px;margin-right:4px">${escHtml(o.store)} ${o.qty}包${o.isEarly ? ' 已移至此日' : ''}</span>`
     ).join('');
+    const noOrderDetail = noOrders.slice(0, 4).map(store =>
+      `<span style="background:#e3f2fd;border-radius:4px;padding:1px 6px;margin-right:4px">${escHtml(store)} 無需</span>`
+    ).join('');
+    const detail = orderDetail + noOrderDetail;
 
     return `<div class="line-group-row">
       <label class="line-group-label">
         <input type="checkbox" checked value="${dateStr}">
         <span style="width:100%">
-          <strong>下單日 ${_dateLabelCN(dateStr)}</strong>
-          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${noOrders.length} 筆無需</span>
-          <br><span style="font-size:0.78rem;line-height:1.8">${shipSummary}</span>
+          <strong>出貨日 ${_dateLabelCN(dateStr)}</strong>
+          <span style="color:#666;font-size:0.88rem">｜${orders.length} 筆、${totalQty} 包、${noOrders.length} 筆無需${early ? `、${early} 筆移至此日` : ''}</span>
+          <br><span style="font-size:0.78rem;line-height:1.8">${detail}</span>
         </span>
       </label>
     </div>`;
@@ -793,24 +823,33 @@ function closeLineModal() {
 
 async function confirmLineImport() {
   const checks = document.querySelectorAll('#lineModalGroups input[type=checkbox]:checked');
-  if (!checks.length) { toast('請勾選要匯入的下單日'); return; }
+  if (!checks.length) { toast('請勾選要匯入的出貨日'); return; }
 
-  // Collect all orders keyed by ship date computed from the LINE message date.
+  // Collect all orders keyed by ship date.
   const byShipDate = {}; // { "YYYY-MM-DD": { storeName: qty } }
+  const noOrdersByDate = {};
   for (const cb of checks) {
-    const { orders } = _lineImportData[cb.value] || {};
+    const { orders, noOrders } = _lineImportData[cb.value] || {};
     if (!orders) continue;
     orders.forEach(o => {
       if (!byShipDate[o.shipDate]) byShipDate[o.shipDate] = {};
       byShipDate[o.shipDate][o.store] = (byShipDate[o.shipDate][o.store] || 0) + o.qty;
     });
+    (noOrders || []).forEach(store => {
+      if (!noOrdersByDate[cb.value]) noOrdersByDate[cb.value] = {};
+      noOrdersByDate[cb.value][store] = true;
+    });
   }
 
-  const shipDates = Object.keys(byShipDate).sort();
+  const shipDates = [...new Set([...Object.keys(byShipDate), ...Object.keys(noOrdersByDate)])].sort();
   for (const dateStr of shipDates) {
-    const stores = byShipDate[dateStr];
+    const stores = byShipDate[dateStr] || {};
+    const noOrders = noOrdersByDate[dateStr] || {};
+    const payload = { date: dateStr, updatedAt: new Date().toISOString() };
+    if (Object.keys(stores).length) payload.stores = stores;
+    if (Object.keys(noOrders).length) payload.noOrders = noOrders;
     await db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).set(
-      { stores, date: dateStr, updatedAt: new Date().toISOString() },
+      payload,
       { merge: true }
     );
   }
@@ -824,26 +863,37 @@ function renderMissingList() {
   const countEl = document.getElementById('missingCount');
   const listEl  = document.getElementById('missingList');
   const ordered = new Set(Object.keys(todayOrders).filter(k => todayOrders[k] > 0));
-  const missing = STORES.filter(s => !ordered.has(s.n));
+  const noNeed = new Set(Object.keys(todayNoOrders));
+  const early = new Set(Object.keys(_earlyOrders));
+  const missing = STORES.filter(s => !ordered.has(s.n) && !noNeed.has(s.n) && !early.has(s.n));
 
   countEl.textContent = `（${missing.length} 家）`;
 
-  if (!missing.length) {
+  const chips = [];
+  STORES.forEach(s => {
+    if (ordered.has(s.n)) return;
+    if (noNeed.has(s.n)) {
+      chips.push(`<span class="missing-chip">${s.n}<span class="tag">無需</span></span>`);
+      return;
+    }
+    if (_earlyOrdersReady && _earlyOrders[s.n]) {
+      const dd = _earlyOrders[s.n];
+      const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
+      chips.push(`<span class="missing-chip">${s.n}<span class="tag early">已移至 ${label} 出貨</span></span>`);
+      return;
+    }
+    const tag = s.dayOff
+      ? `<span class="tag dayoff">休${s.dayOff}</span>`
+      : '<span class="tag missing">未叫</span>';
+    chips.push(`<span class="missing-chip">${s.n}${tag}</span>`);
+  });
+
+  if (!chips.length) {
     listEl.innerHTML = '<span class="missing-chip"><span class="tag early">全數已叫貨</span></span>';
     return;
   }
 
-  listEl.innerHTML = missing.map(s => {
-    let tag = '<span class="tag">無需</span>';
-    if (_earlyOrdersReady && _earlyOrders[s.n]) {
-      const dd = _earlyOrders[s.n];
-      const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
-      tag = `<span class="tag early">已移至 ${label} 出貨</span>`;
-    } else if (s.dayOff) {
-      tag = `<span class="tag dayoff">休${s.dayOff}</span>`;
-    }
-    return `<span class="missing-chip">${s.n}${tag}</span>`;
-  }).join('');
+  listEl.innerHTML = chips.join('');
 }
 
 async function loadEarlyOrders() {
