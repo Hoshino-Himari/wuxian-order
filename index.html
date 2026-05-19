@@ -458,8 +458,10 @@ function normalizeStoreName(raw) {
   let name = (raw || '').trim();
   name = name.replace(/^[@＠][^\s]+[\s-]*/, '').trim();
   if (STORE_ALIASES[name]) return STORE_ALIASES[name];
+  if (STORE_BY_NAME[name]) return name;
   const compactName = name.replace(/\s+/g, '');
   if (STORE_ALIASES[compactName]) return STORE_ALIASES[compactName];
+  if (STORE_BY_NAME[compactName]) return compactName;
   name = name.replace(/^(五鮮級|燒甲五春|燒甲)[\s-]*/, '').trim();
   name = name.replace(/^[-－–—]+/, '').trim();
   name = name.split(/\s+/)[0];
@@ -499,15 +501,32 @@ function extractLineOrderBlocks(content) {
 
 function extractStoresFromText(content) {
   const found = new Set();
+  const occupied = [];
+  const addIfFree = (label, store) => {
+    if (!label) return;
+    let start = content.indexOf(label);
+    while (start >= 0) {
+      const end = start + label.length;
+      const overlaps = occupied.some(range => start < range.end && end > range.start);
+      if (!overlaps) {
+        occupied.push({ start, end });
+        found.add(store);
+        return;
+      }
+      start = content.indexOf(label, start + 1);
+    }
+  };
+
   for (const match of content.matchAll(/店[\s　]*名[：:]\s*([^\n\r]+)/g)) {
     found.add(normalizeStoreName(match[1]));
   }
-  STORES.forEach(s => {
-    if (content.includes(s.n)) found.add(s.n);
-  });
-  Object.entries(STORE_ALIASES).forEach(([alias, store]) => {
-    if (content.includes(alias)) found.add(store);
-  });
+
+  const candidates = [
+    ...Object.entries(STORE_ALIASES).map(([alias, store]) => ({ label: alias, store })),
+    ...STORES.map(s => ({ label: s.n, store: s.n }))
+  ].sort((a, b) => b.label.length - a.label.length);
+
+  candidates.forEach(({ label, store }) => addIfFree(label, store));
   return [...found];
 }
 
