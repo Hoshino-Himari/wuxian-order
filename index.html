@@ -91,6 +91,18 @@
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
+
+    .line-import { margin-top: 14px; padding-top: 14px; border-top: 1px solid #eee; }
+    #lineText { width: 100%; height: 130px; padding: 10px; border: 1.5px solid #ddd;
+                border-radius: 8px; font-size: 0.82rem; font-family: inherit;
+                resize: vertical; margin-bottom: 8px; background: #fafafa; }
+    #lineText:focus { outline: none; border-color: #1e6b3e; background: white; }
+    .line-preview-date { font-weight: 700; color: #1e6b3e; margin: 10px 0 4px; font-size: 0.88rem; }
+    .line-preview-row { display: flex; justify-content: space-between; padding: 3px 0;
+                        border-bottom: 1px solid #f0f0f0; font-size: 0.85rem; }
+    .line-preview-total { margin-top: 8px; font-weight: 700; font-size: 0.88rem; }
+    .warn-tag { color: #e65100; font-size: 0.75rem; }
+    #importBtn { width: 100%; padding: 12px; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -156,6 +168,17 @@
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
+
+    <div class="line-import">
+      <div class="section-title" style="margin-bottom:8px">LINE 對話匯入</div>
+      <textarea id="lineText" placeholder="貼上 LINE 對話記錄（下載檔案或 Mac 複製貼上皆可）…"></textarea>
+      <div class="admin-row">
+        <button class="btn-sm btn-blue" onclick="parseLine()">解析預覽</button>
+        <button class="btn-sm btn-gray" onclick="clearLineInput()">清除</button>
+      </div>
+      <div id="linePreview"></div>
+      <button id="importBtn" class="btn-sm btn-orange" style="display:none" onclick="importLine()">確認匯入至系統</button>
+    </div>
   </div>
 
 </div>
@@ -484,6 +507,152 @@ function exportExcel() {
 
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── LINE 對話匯入 ──────────────────────────────────────
+
+// 正規化門市名稱：把 LINE 傳來的名稱對應到 STORES 清單
+function normalizeStoreName(raw) {
+  const name = raw.trim();
+  // 完全吻合
+  if (STORES.find(s => s.n === name)) return name;
+  // 前綴吻合：e.g. "岡山" → "岡山旗艦店"
+  const pre = STORES.find(s => s.n.startsWith(name) && name.length > 1);
+  if (pre) return pre.n;
+  // 後綴吻合：e.g. "鼓山店" → "新鼓山店"、"陽明店" → "燒甲陽明店"
+  const suf = STORES.find(s => s.n.endsWith(name) && name.length > 1);
+  if (suf) return suf.n;
+  // 包含吻合：e.g. "五鮮級-佳里店" 包含 "佳里店"
+  const inc = STORES.find(s => name.includes(s.n) && s.n.length > 1);
+  if (inc) return inc.n;
+  return name; // 無法對應，原樣保留
+}
+
+// 解析 LINE 對話文字，回傳 [{ store, date, qty }]
+// 同時支援 LINE 下載格式（tab 分隔）與 Mac 複製貼上格式（時間+發送者+訊息同行）
+function parseLineText(text) {
+  const results = [];
+  // 將 LINE 下載格式的 tab 分隔行展開，使訊息內容另起一行
+  // 格式："HH:MM\t發送者\t訊息" → "HH:MM 發送者\n訊息"
+  const normalized = text.replace(/^(\d{1,2}:\d{2})\t([^\t]+)\t/gm, '$1 $2\n');
+  const lines = normalized.split('\n');
+
+  let store = null, date = null, qty = null;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+
+    // 跳過已收回訊息、無需叫貨等
+    if (t.includes('已收回訊息')) { store = date = qty = null; continue; }
+    if (/無需叫貨|不叫貨|今日無需|無需訂貨/.test(t)) { store = date = qty = null; continue; }
+
+    // 門市名稱：店　名 / 店 名 / 店名（支援全形空格）
+    const sm = t.match(/店\s*名[：:]\s*(.+)/);
+    if (sm) {
+      if (store && date && qty != null) results.push({ store, date, qty });
+      store = normalizeStoreName(sm[1].trim());
+      date = null; qty = null;
+      continue;
+    }
+
+    if (!store) continue;
+
+    // 到貨日 / 訂貨日 / 下單日，格式 M/D 或 M/D（...）
+    const dm = t.match(/[到訂下][貨單]日[：:]\s*(\d{1,2})\/(\d{1,2})/);
+    if (dm) {
+      const m = parseInt(dm[1]), d = parseInt(dm[2]);
+      const y = new Date().getFullYear();
+      date = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      continue;
+    }
+
+    // 數量 (包)：N 或 (包): N（有時前後有空白）
+    const qm = t.match(/\(包\)[：:]\s*(\d+)/);
+    if (qm) {
+      qty = parseInt(qm[1]);
+      if (store && date) {
+        results.push({ store, date, qty });
+        store = date = qty = null;
+      }
+      continue;
+    }
+  }
+
+  if (store && date && qty != null) results.push({ store, date, qty });
+  return results;
+}
+
+function parseLine() {
+  const text = document.getElementById('lineText').value;
+  const orders = parseLineText(text);
+  const preview = document.getElementById('linePreview');
+
+  if (!orders.length) {
+    preview.innerHTML = '<p style="color:#999;font-size:0.85rem;margin-top:6px">未找到有效訂單，請確認貼上的格式是否包含「店　名：」與「(包)：」欄位</p>';
+    document.getElementById('importBtn').style.display = 'none';
+    return;
+  }
+
+  const byDate = {};
+  orders.forEach(o => { (byDate[o.date] = byDate[o.date] || []).push(o); });
+
+  const knownNames = new Set(STORES.map(s => s.n));
+  let html = '<div>';
+  let totalPkg = 0;
+  Object.keys(byDate).sort().forEach(date => {
+    const [y, m, d] = date.split('-');
+    const list = byDate[date];
+    html += `<div class="line-preview-date">${parseInt(m)}月${parseInt(d)}日 到貨（${list.length} 家）</div>`;
+    list.forEach(o => {
+      const warn = knownNames.has(o.store) ? '' : ' <span class="warn-tag">⚠ 未匹配</span>';
+      html += `<div class="line-preview-row"><span>${o.store}${warn}</span><span style="font-weight:700;color:#1e6b3e">${o.qty} 包</span></div>`;
+      totalPkg += o.qty;
+    });
+  });
+  html += `<div class="line-preview-total">共 ${orders.length} 家　${totalPkg} 包　（${Object.keys(byDate).length} 個到貨日）</div>`;
+  html += '</div>';
+
+  preview.innerHTML = html;
+  document.getElementById('importBtn').style.display = 'block';
+  window._parsedOrders = orders;
+}
+
+function clearLineInput() {
+  document.getElementById('lineText').value = '';
+  document.getElementById('linePreview').innerHTML = '';
+  document.getElementById('importBtn').style.display = 'none';
+  window._parsedOrders = null;
+}
+
+async function importLine() {
+  const orders = window._parsedOrders;
+  if (!orders || !orders.length) return;
+
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true;
+  btn.textContent = '匯入中…';
+
+  const byDate = {};
+  orders.forEach(o => { (byDate[o.date] = byDate[o.date] || {})[o.store] = o.qty; });
+
+  try {
+    for (const [date, stores] of Object.entries(byDate)) {
+      const docId = `五鮮級_${date}`;
+      await db.collection('orders_wuxian').doc(docId).set(
+        { stores, date, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }
+    const dates = Object.keys(byDate).sort();
+    toast(`✓ 已匯入 ${orders.length} 筆，到貨日：${dates.join('、')}`);
+    clearLineInput();
+  } catch(e) {
+    toast('匯入失敗：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '確認匯入至系統';
+  }
 }
 
 // ── Toast ─────────────────────────────────────────────
