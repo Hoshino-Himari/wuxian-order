@@ -283,6 +283,18 @@ const STORES = [
   { r:"燒甲", n:"燒甲陽明店",      dayOff:"週二、三" },
   { r:"燒甲", n:"燒甲嘉義民北店",  dayOff:"週二、三" },
 ];
+const STORE_ALIASES = {
+  "陽明店": "燒甲陽明店",
+  "燒甲五春陽明店": "燒甲陽明店",
+  "燒甲陽明": "燒甲陽明店",
+  "嘉義民北店": "燒甲嘉義民北店",
+  "民北店": "燒甲嘉義民北店",
+  "燒甲民北店": "燒甲嘉義民北店",
+  "五鮮級新港店": "新港店",
+  "五鮮級太保店": "太保店",
+  "五鮮級水上店": "水上店"
+};
+const STORE_BY_NAME = Object.fromEntries(STORES.map(s => [s.n, s]));
 
 // ── Firebase ──────────────────────────────────────────
 const firebaseConfig = {
@@ -391,7 +403,7 @@ function parseArrivalDateFromMessage(content, messageDate) {
     return `${year}-${numeric[1].padStart(2, '0')}-${numeric[2].padStart(2, '0')}`;
   }
 
-  const weekday = content.match(/(?:週|星期|禮拜)([日天一二三四五六])\s*(?:到貨|送達|交貨)/);
+  const weekday = content.match(/(?:週|星期|禮拜)([日天一二三四五六])\s*(?:到貨|送達|交貨|到)/);
   if (weekday) return getNextWeekdayDate(messageDate, WEEKDAY_INDEX[weekday[1]]);
 
   return "";
@@ -401,6 +413,26 @@ function getLineOrderShipDate(content, messageDate) {
   const arrivalDate = parseArrivalDateFromMessage(content, messageDate);
   if (arrivalDate) return getShipDateBeforeArrival(arrivalDate);
   return getNextShipDateFromMessageDate(messageDate);
+}
+
+function normalizeStoreName(raw) {
+  let name = (raw || '').trim();
+  name = name.replace(/^[@＠][^\s]+[\s-]*/, '').trim();
+  name = name.replace(/^(五鮮級|五鮮級-|燒甲五春|燒甲五春-|燒甲-)/, '').trim();
+  name = name.replace(/[，,。．.：:；;、\s]+$/g, '').trim();
+  if (STORE_ALIASES[name]) return STORE_ALIASES[name];
+  if (STORE_BY_NAME[name]) return name;
+  return name;
+}
+
+function normalizeOrderStores(stores) {
+  const normalized = {};
+  Object.entries(stores || {}).forEach(([name, qty]) => {
+    const storeName = normalizeStoreName(name);
+    const amount = parseInt(qty, 10) || 0;
+    normalized[storeName] = (normalized[storeName] || 0) + amount;
+  });
+  return normalized;
 }
 
 function setDate(dateStr) {
@@ -419,7 +451,7 @@ function listenOrders() {
   if (!currentDate) return;
   const docId = `五鮮級_${currentDate}`;
   unsubscribe = db.collection("orders_wuxian").doc(docId).onSnapshot(snap => {
-    todayOrders = (snap.exists && snap.data().stores) ? snap.data().stores : {};
+    todayOrders = (snap.exists && snap.data().stores) ? normalizeOrderStores(snap.data().stores) : {};
     renderOrderList();
   });
 }
@@ -435,8 +467,8 @@ function storeSelectChanged() {
 
 // ── 送出下單 ──────────────────────────────────────────
 async function submitOrder() {
-  const store = document.getElementById("storeInput").value.trim()
-             || document.getElementById("storeSelect").value;
+  const store = normalizeStoreName(document.getElementById("storeInput").value.trim()
+             || document.getElementById("storeSelect").value);
   const qty   = parseInt(document.getElementById("qtyInput").value) || 0;
   if (!store) { toast("請輸入門市名稱"); return; }
   if (qty < 1) { toast("請輸入包數"); return; }
@@ -686,7 +718,7 @@ function parseLineText(text) {
     const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
 
     if (storeM && qtyM) {
-      const store = storeM[1].trim();
+      const store = normalizeStoreName(storeM[1]);
       const qty   = parseInt(qtyM[1], 10);
       const shipDate = getLineOrderShipDate(content, date);
       byDate[date].orders.push({ store, qty, shipDate });
@@ -791,7 +823,7 @@ function renderMissingList() {
     if (_earlyOrdersReady && _earlyOrders[s.n]) {
       const dd = _earlyOrders[s.n];
       const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
-      tag = `<span class="tag early">已提前 ${label}</span>`;
+      tag = `<span class="tag early">已移至 ${label} 出貨</span>`;
     } else if (s.dayOff) {
       tag = `<span class="tag dayoff">休${s.dayOff}</span>`;
     }
@@ -811,7 +843,7 @@ async function loadEarlyOrders() {
     reads.push(
       db.collection('orders_wuxian').doc(`五鮮級_${dateStr}`).get().then(snap => {
         if (snap.exists && snap.data().stores)
-          Object.keys(snap.data().stores).forEach(name => {
+          Object.keys(normalizeOrderStores(snap.data().stores)).forEach(name => {
             if (!_earlyOrders[name]) _earlyOrders[name] = dateStr;
           });
       })
