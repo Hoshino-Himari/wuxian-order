@@ -396,6 +396,12 @@ function getNextWeekdayDate(baseDate, targetDow) {
   return fmtDate(d);
 }
 
+function parseArrivalWeekdayFromMessage(content, messageDate) {
+  const weekday = content.match(/(?:週|星期|禮拜)([日天一二三四五六])\s*(?:到貨|送達|交貨|到)/);
+  if (weekday) return getNextWeekdayDate(messageDate, WEEKDAY_INDEX[weekday[1]]);
+  return "";
+}
+
 function parseArrivalDateFromMessage(content, messageDate) {
   const year = parseInt(messageDate.slice(0, 4), 10);
   const numeric = content.match(/(?:到貨|訂貨|交貨)日?[：:\s]*(\d{1,2})[\/.-](\d{1,2})/);
@@ -403,14 +409,12 @@ function parseArrivalDateFromMessage(content, messageDate) {
     return `${year}-${numeric[1].padStart(2, '0')}-${numeric[2].padStart(2, '0')}`;
   }
 
-  const weekday = content.match(/(?:週|星期|禮拜)([日天一二三四五六])\s*(?:到貨|送達|交貨|到)/);
-  if (weekday) return getNextWeekdayDate(messageDate, WEEKDAY_INDEX[weekday[1]]);
-
-  return "";
+  return parseArrivalWeekdayFromMessage(content, messageDate);
 }
 
-function getLineOrderShipDate(content, messageDate) {
-  const arrivalDate = parseArrivalDateFromMessage(content, messageDate);
+function getLineOrderShipDate(content, messageDate, fallbackContent = "") {
+  const arrivalDate = parseArrivalDateFromMessage(content, messageDate)
+    || (fallbackContent ? parseArrivalWeekdayFromMessage(fallbackContent, messageDate) : "");
   if (arrivalDate) return getShipDateBeforeArrival(arrivalDate);
   return getNextShipDateFromMessageDate(messageDate);
 }
@@ -433,6 +437,14 @@ function normalizeOrderStores(stores) {
     normalized[storeName] = (normalized[storeName] || 0) + amount;
   });
   return normalized;
+}
+
+function extractLineOrderBlocks(content) {
+  const matches = [...content.matchAll(/^店[\s　]*名[：:]\s*(.+)$/gm)];
+  return matches.map((match, idx) => {
+    const next = matches[idx + 1];
+    return content.slice(match.index, next ? next.index : content.length).trim();
+  });
 }
 
 function setDate(dateStr) {
@@ -660,8 +672,8 @@ function onLineTextInput() {
 function parseLineText(text) {
   const lines = text.split('\n');
   const timeRe = /^\d{1,2}:\d{2}\s/;
-  // Date markers like "2026.05.19 星期二" — mark when the calendar date changes
-  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})\s+星期/;
+  // Date markers like "2026.05.19 星期二" or just "2026.05.19".
+  const dateMarkerRe = /^(\d{4})\.(\d{2})\.(\d{2})(?:\s|$)/;
 
   // First pass: find all date markers and their line positions
   const dateMarkers = []; // [{ lineIndex, date: "YYYY-MM-DD" }]
@@ -714,14 +726,17 @@ function parseLineText(text) {
 
     if (!byDate[date]) byDate[date] = { orders: [], noOrders: [] };
 
-    const storeM = content.match(/店　名[：:]\s*(.+)/);
-    const qtyM   = content.match(/\(包\)\s*[：:]\s*(\d+)/);
-
-    if (storeM && qtyM) {
-      const store = normalizeStoreName(storeM[1]);
-      const qty   = parseInt(qtyM[1], 10);
-      const shipDate = getLineOrderShipDate(content, date);
-      byDate[date].orders.push({ store, qty, shipDate });
+    const orderBlocks = extractLineOrderBlocks(content);
+    if (orderBlocks.length) {
+      orderBlocks.forEach(block => {
+        const storeM = block.match(/^店[\s　]*名[：:]\s*(.+)$/m);
+        const qtyM   = block.match(/\(包\)\s*[：:]\s*(\d+)/);
+        if (!storeM || !qtyM) return;
+        const store = normalizeStoreName(storeM[1]);
+        const qty   = parseInt(qtyM[1], 10);
+        const shipDate = getLineOrderShipDate(block, date, content);
+        byDate[date].orders.push({ store, qty, shipDate });
+      });
     } else if (/無需叫貨|不叫貨|無需訂貨|今日無需/.test(content)) {
       byDate[date].noOrders.push(content.trim());
     }
