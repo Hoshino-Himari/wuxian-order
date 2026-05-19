@@ -162,10 +162,9 @@
     </div>
     <div class="admin-row">
       <button class="btn-sm btn-blue" onclick="exportExcel()">⬇ 下載 Excel</button>
-      <button class="btn-sm btn-green" onclick="triggerLineImport()">📋 匯入 LINE</button>
+      <button class="btn-sm btn-green" onclick="openLineModal()">📋 匯入 LINE</button>
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
-    <input type="file" id="lineFileInput" accept=".txt" style="display:none" onchange="handleLineFile(event)">
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
   </div>
 
@@ -174,11 +173,15 @@
 <!-- LINE 匯入 Modal -->
 <div id="lineModal" class="line-modal-overlay" style="display:none">
   <div class="card line-modal-body">
-    <div class="section-title" style="margin-bottom:8px">📋 LINE 訂單預覽</div>
-    <div id="lineModalSummary" style="font-size:0.88rem;color:#666;margin-bottom:14px"></div>
+    <div class="section-title" style="margin-bottom:10px">📋 LINE 訂單匯入</div>
+    <textarea id="lineTextarea"
+      placeholder="請貼上從 LINE 複製的訊息…"
+      style="width:100%;height:150px;padding:12px;border:1.5px solid #ddd;border-radius:10px;font-size:0.88rem;font-family:inherit;resize:vertical;background:#fafafa;"
+      oninput="onLineTextInput()"></textarea>
+    <div id="lineModalSummary" style="font-size:0.88rem;color:#666;margin:10px 0 6px;min-height:1.2em"></div>
     <div id="lineModalGroups"></div>
-    <div style="display:flex;gap:8px;margin-top:18px">
-      <button class="btn-submit" onclick="confirmLineImport()" style="padding:14px">✓ 確認匯入</button>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-submit" id="lineImportBtn" onclick="confirmLineImport()" style="padding:14px" disabled>✓ 確認匯入</button>
       <button class="btn-sm btn-gray" onclick="closeLineModal()" style="padding:14px 20px;font-size:1rem">取消</button>
     </div>
   </div>
@@ -512,25 +515,36 @@ function exportExcel() {
 
 // ── LINE 匯入 ──────────────────────────────────────────
 let _lineImportData = null;
+let _lineDebounce  = null;
 
-function triggerLineImport() {
-  document.getElementById('lineFileInput').value = '';
-  document.getElementById('lineFileInput').click();
+function openLineModal() {
+  document.getElementById('lineTextarea').value = '';
+  document.getElementById('lineModalSummary').textContent = '';
+  document.getElementById('lineModalGroups').innerHTML = '';
+  document.getElementById('lineImportBtn').disabled = true;
+  _lineImportData = null;
+  document.getElementById('lineModal').style.display = 'block';
+  setTimeout(() => document.getElementById('lineTextarea').focus(), 50);
 }
 
-function handleLineFile(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
+function onLineTextInput() {
+  clearTimeout(_lineDebounce);
+  _lineDebounce = setTimeout(() => {
+    const text = document.getElementById('lineTextarea').value;
+    if (!text.trim()) {
+      document.getElementById('lineModalSummary').textContent = '';
+      document.getElementById('lineModalGroups').innerHTML = '';
+      document.getElementById('lineImportBtn').disabled = true;
+      _lineImportData = null;
+      return;
+    }
     try {
-      _lineImportData = parseLineText(e.target.result);
+      _lineImportData = parseLineText(text);
       showLineModal(_lineImportData);
     } catch(err) {
       toast('解析失敗：' + err.message);
     }
-  };
-  reader.readAsText(file, 'utf-8');
+  }, 300);
 }
 
 function parseLineText(text) {
@@ -631,11 +645,12 @@ function showLineModal(byDate) {
   }).join('') : '<div style="color:#bbb;text-align:center;padding:20px">未找到任何訂單</div>';
 
   document.getElementById('lineModalGroups').innerHTML = groupsHtml;
-  document.getElementById('lineModal').style.display = 'block';
+  document.getElementById('lineImportBtn').disabled = !dates.length;
 }
 
 function closeLineModal() {
   document.getElementById('lineModal').style.display = 'none';
+  document.getElementById('lineTextarea').value = '';
   _lineImportData = null;
 }
 
