@@ -365,7 +365,7 @@ function fmtDate(d) {
 function fmtDateCN(str) {
   if (!str) return "";
   const [y,m,d] = str.split("-");
-  return `${y}年${parseInt(m)}月${parseInt(d)}日 到貨`;
+  return `${y}年${parseInt(m)}月${parseInt(d)}日 出貨`;
 }
 
 const SHIP_DAYS = [2, 4, 6]; // 二、四、六出貨
@@ -430,11 +430,14 @@ function getLineOrderShipDate(content, defaultShipDate, fallbackContent = "") {
   return /提早|提前|店休|公休/.test(text) ? getNextShipDateAfter(defaultShipDate) : defaultShipDate;
 }
 
-function shouldMoveToNextShipDate(store, content, fallbackContent = "") {
+function shouldMoveToNextShipDate(store, defaultShipDate, content, fallbackContent = "") {
   const text = `${content}\n${fallbackContent}`;
   if (/提早|提前|店休|公休/.test(text)) return true;
   const info = STORE_BY_NAME[store];
-  return !!(info && info.dayOff && /到貨日|頻率|隔週/.test(text));
+  if (!info || !info.dayOff || !/到貨日|頻率|隔週/.test(text)) return false;
+  const arrival = new Date(defaultShipDate + 'T00:00:00');
+  arrival.setDate(arrival.getDate() + 1);
+  return info.dayOff.includes(_DOW[arrival.getDay()]);
 }
 
 function normalizeStoreName(raw) {
@@ -764,7 +767,7 @@ function parseLineText(text) {
         }
         if (!qtyM) return;
         const qty   = parseInt(qtyM[1], 10);
-        const shipDate = shouldMoveToNextShipDate(store, block, content)
+        const shipDate = shouldMoveToNextShipDate(store, defaultShipDate, block, content)
           ? getNextShipDateAfter(defaultShipDate)
           : defaultShipDate;
         if (!byShipDate[shipDate]) byShipDate[shipDate] = { orders: [], noOrders: [] };
