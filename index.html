@@ -430,6 +430,13 @@ function getLineOrderShipDate(content, defaultShipDate, fallbackContent = "") {
   return /提早|提前|店休|公休/.test(text) ? getNextShipDateAfter(defaultShipDate) : defaultShipDate;
 }
 
+function shouldMoveToNextShipDate(store, content, fallbackContent = "") {
+  const text = `${content}\n${fallbackContent}`;
+  if (/提早|提前|店休|公休/.test(text)) return true;
+  const info = STORE_BY_NAME[store];
+  return !!(info && info.dayOff && /到貨日|頻率|隔週/.test(text));
+}
+
 function normalizeStoreName(raw) {
   let name = (raw || '').trim();
   name = name.replace(/^[@＠][^\s]+[\s-]*/, '').trim();
@@ -757,7 +764,9 @@ function parseLineText(text) {
         }
         if (!qtyM) return;
         const qty   = parseInt(qtyM[1], 10);
-        const shipDate = getLineOrderShipDate(block, defaultShipDate, content);
+        const shipDate = shouldMoveToNextShipDate(store, block, content)
+          ? getNextShipDateAfter(defaultShipDate)
+          : defaultShipDate;
         if (!byShipDate[shipDate]) byShipDate[shipDate] = { orders: [], noOrders: [] };
         byShipDate[shipDate].orders.push({ store, qty, shipDate, isEarly: shipDate !== defaultShipDate });
       });
