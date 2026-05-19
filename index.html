@@ -63,7 +63,15 @@
     .order-qty { font-weight: 700; color: #1e6b3e; }
     .no-orders { text-align: center; color: #bbb; padding: 20px 0; font-size: 0.92rem; }
     .order-total { display: flex; justify-content: space-between; padding: 10px 0 0;
-                   border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
+                    border-top: 2px solid #e8f5e9; margin-top: 6px; font-weight: 700; color: #1e6b3e; }
+    .missing-block { border-top: 1px solid #eef3ee; margin-top: 10px; padding-top: 10px; }
+    .missing-title { color: #aaa; font-size: 0.9rem; font-weight: 700; margin-bottom: 8px; }
+    .missing-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .missing-chip { display: inline-flex; align-items: center; gap: 4px; background: #f3f5f3;
+                    color: #b0b0b0; border-radius: 6px; padding: 4px 8px; font-size: 0.82rem; font-weight: 700; }
+    .missing-chip .tag { color: #1976d2; background: #e3f2fd; border-radius: 4px; padding: 1px 4px; font-size: 0.76rem; }
+    .missing-chip .tag.early { color: #1e6b3e; background: #e8f5e9; }
+    .missing-chip .tag.dayoff { color: #e65100; background: #fff3e0; }
 
     /* 管理員區塊 */
     .admin-toggle { text-align: center; margin-bottom: 12px; }
@@ -149,17 +157,13 @@
     <div class="order-list" id="orderList">
       <div class="no-orders">尚無訂單</div>
     </div>
-  </div>
-
-  <!-- 未叫單 -->
-  <div class="card">
-    <div class="section-title" style="cursor:pointer;user-select:none" onclick="toggleMissing()">
-      未叫單門市
-      <span id="missingCount" style="font-weight:400;color:#aaa;font-size:0.88rem"></span>
-      <span id="missingToggleIcon" style="float:right">▾</span>
-    </div>
-    <div class="order-list" id="missingList" style="display:none">
-      <div class="no-orders">載入中…</div>
+    <div class="missing-block">
+      <div class="missing-title">
+        未叫貨 <span id="missingCount">（載入中）</span>
+      </div>
+      <div class="missing-chip-list" id="missingList">
+        <span class="missing-chip">載入中…</span>
+      </div>
     </div>
   </div>
 
@@ -513,7 +517,7 @@ function renderOrderList() {
     </div>`
   ).join("") + `<div class="order-total">
     <span>共 ${entries.length} 家</span>
-    <span>${totalPkg} 包</span>
+    <span>${totalPkg} 包｜${totalPkg * 5} 斤</span>
   </div>`;
   renderMissingList();
 }
@@ -769,45 +773,29 @@ async function confirmLineImport() {
   setDate(shipDates[0]);
 }
 
-// ── 未叫單 ────────────────────────────────────────────
-let _missingOpen = false;
-
-function toggleMissing() {
-  _missingOpen = !_missingOpen;
-  document.getElementById('missingList').style.display = _missingOpen ? 'block' : 'none';
-  document.getElementById('missingToggleIcon').textContent = _missingOpen ? '▴' : '▾';
-  if (_missingOpen) renderMissingList();
-}
-
 function renderMissingList() {
   const countEl = document.getElementById('missingCount');
   const listEl  = document.getElementById('missingList');
   const ordered = new Set(Object.keys(todayOrders).filter(k => todayOrders[k] > 0));
   const missing = STORES.filter(s => !ordered.has(s.n));
 
-  countEl.textContent = missing.length ? `（${missing.length} 家）` : '';
-
-  if (!_missingOpen) return;
+  countEl.textContent = `（${missing.length} 家）`;
 
   if (!missing.length) {
-    listEl.innerHTML = '<div class="no-orders">所有門市今日已叫貨 ✓</div>';
+    listEl.innerHTML = '<span class="missing-chip"><span class="tag early">全數已叫貨</span></span>';
     return;
   }
 
   listEl.innerHTML = missing.map(s => {
-    let badge = '';
+    let tag = '<span class="tag">無需</span>';
     if (_earlyOrdersReady && _earlyOrders[s.n]) {
       const dd = _earlyOrders[s.n];
       const label = `${parseInt(dd.slice(5,7))}/${parseInt(dd.slice(8,10))}`;
-      badge = `<span style="color:#2e7d32;font-size:0.78rem;margin-left:4px">✓ 已提前叫貨（出貨 ${label}）</span>`;
+      tag = `<span class="tag early">已提前 ${label}</span>`;
     } else if (s.dayOff) {
-      badge = `<span class="dayoff-tag">${s.dayOff} 公休</span>`;
+      tag = `<span class="tag dayoff">休${s.dayOff}</span>`;
     }
-    const isEarly = _earlyOrdersReady && _earlyOrders[s.n];
-    return `<div class="order-item">
-      <span class="order-name">${s.n}${badge}</span>
-      <span style="color:${isEarly ? '#2e7d32' : '#ddd'};font-size:0.82rem">${isEarly ? '✓' : '未叫'}</span>
-    </div>`;
+    return `<span class="missing-chip">${s.n}${tag}</span>`;
   }).join('');
 }
 
