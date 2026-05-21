@@ -88,6 +88,9 @@
     .section-title { font-weight: 700; color: #1e6b3e; margin-bottom: 10px; font-size: 0.92rem; }
     .dayoff-tag { font-size: 0.7rem; color: #e65100; background: #fff3e0; border-radius: 4px;
                   padding: 1px 5px; margin-left: 4px; }
+    .parse-divider { border: none; border-top: 1px solid #eee; margin: 16px 0 14px; }
+    .parse-store-chip { font-size: 0.8rem; background: #f5f5f5; border-radius: 6px;
+                        padding: 3px 8px; white-space: nowrap; display: inline-flex; align-items: center; }
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
              background: #333; color: white; padding: 10px 22px; border-radius: 22px;
              font-size: 0.88rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 99; }
@@ -156,6 +159,18 @@
       <button class="btn-sm btn-orange" onclick="clearDate()">🗑 清除此日</button>
     </div>
     <div id="saveStatus" style="margin-top:10px;font-size:0.82rem;color:#666;"></div>
+
+    <hr class="parse-divider">
+    <div class="section-title">解析 LINE 訊息</div>
+    <textarea id="lineInput" rows="8" placeholder="貼上 LINE 群組訊息…"
+      style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;
+             font-size:0.82rem;font-family:inherit;resize:vertical;background:#fafafa;
+             margin-bottom:8px;"></textarea>
+    <div class="admin-row">
+      <button class="btn-sm btn-blue" onclick="parseLineMessages()">解析</button>
+      <button class="btn-sm btn-gray" onclick="clearParse()">清除</button>
+    </div>
+    <div id="parseResult" style="margin-top:14px;"></div>
   </div>
 
 </div>
@@ -484,6 +499,117 @@ function exportExcel() {
 
   XLSX.writeFile(wb, `五鮮級_${currentDate}.xlsx`);
   toast("✓ Excel 已下載");
+}
+
+// ── LINE 訊息解析 ──────────────────────────────────────
+// 別名對照：訊息中的縮寫/異名 → STORES 裡的正式名稱
+const STORE_ALIAS = {
+  '岡山':  '岡山旗艦店',
+  '鼓山店': '新鼓山店',
+};
+
+function normalizeStoreName(n) {
+  n = n.replace(/^五鮮級[-－]/, '').trim();
+  return STORE_ALIAS[n] || n;
+}
+
+function inferStoreFromSender(sender) {
+  for (const s of STORES) {
+    if (sender.includes(s.n)) return s.n;
+  }
+  return '';
+}
+
+function parseLineMessages() {
+  const raw = document.getElementById('lineInput').value;
+  if (!raw.trim()) { toast('請貼入 LINE 訊息'); return; }
+
+  // 以時間戳記行為邊界切割訊息區塊
+  const rawBlocks = raw.split(/(?=^\d{1,2}:\d{2}\s)/m);
+  const parsed = {};
+
+  for (const block of rawBlocks) {
+    // 只處理含蛤蜊下單格式的訊息
+    if (!block.includes('蛤蜊') || !block.match(/[（(]包[)）]\s*[：:]\s*\d+/)) continue;
+
+    // 從第一行拆出發送者
+    const firstLine = block.split('\n')[0];
+    const tm = firstLine.match(/^(\d{1,2}:\d{2})\s+(.*)/);
+    const rest = tm ? tm[2] : '';
+
+    // 店名欄之前的文字即為發送者
+    const snPos = rest.search(/店[\s　]*名[：:]/);
+    const sender = snPos > 0 ? rest.slice(0, snPos).trim() : rest.split(/\s/)[0];
+
+    // 取店名（捕捉店名：後到行尾）
+    const nm = block.match(/店[\s　]*名[：:]\s*([^\n\r]*)/);
+    let name = nm ? nm[1].trim() : '';
+
+    // 店名空白時（如大灣店訊息），從發送者推斷
+    if (!name) name = inferStoreFromSender(sender);
+    if (!name) continue;
+
+    name = normalizeStoreName(name);
+
+    // 取包數
+    const qm = block.match(/[（(]包[)）]\s*[：:]\s*(\d+)/);
+    if (!qm) continue;
+    const qty = parseInt(qm[1]);
+    if (qty > 0) parsed[name] = qty;
+  }
+
+  renderParseResult(parsed);
+}
+
+function renderParseResult(parsed) {
+  const el = document.getElementById('parseResult');
+  const knownSet = new Set(STORES.map(s => s.n));
+
+  const ordered = [
+    ...STORES.filter(s => parsed[s.n] > 0).map(s => ({ n: s.n, qty: parsed[s.n] })),
+    ...Object.keys(parsed).filter(n => !knownSet.has(n) && parsed[n] > 0).map(n => ({ n, qty: parsed[n] }))
+  ];
+  const notOrdered = STORES.filter(s => !parsed[s.n]);
+
+  if (!ordered.length && !notOrdered.length) {
+    el.innerHTML = '<div class="no-orders">未解析到有效訂單</div>'; return;
+  }
+
+  const total = ordered.reduce((s, e) => s + e.qty, 0);
+  let html = '<div class="order-list">';
+  html += ordered.map(e =>
+    `<div class="order-item">
+      <span class="order-name">${e.n}</span>
+      <span class="order-qty">${e.qty} 包</span>
+    </div>`
+  ).join('');
+  if (ordered.length) {
+    html += `<div class="order-total">
+      <span>共 ${ordered.length} 家</span>
+      <span>${total} 包 | ${total * 5} 斤</span>
+    </div>`;
+  }
+  html += '</div>';
+
+  if (notOrdered.length) {
+    html += `<div style="margin-top:12px;font-size:0.82rem;font-weight:600;color:#888;">
+      未叫貨（${notOrdered.length} 家）</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">`;
+    notOrdered.forEach(s => {
+      const tag = s.dayOff
+        ? `<span class="dayoff-tag">休${s.dayOff}</span>`
+        : `<span style="font-size:0.68rem;color:#bbb;margin-left:3px;">未叫</span>`;
+      html += `<span class="parse-store-chip">${s.n}${tag}</span>`;
+    });
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function clearParse() {
+  document.getElementById('lineInput').value = '';
+  document.getElementById('parseResult').innerHTML = '';
 }
 
 // ── Toast ─────────────────────────────────────────────
